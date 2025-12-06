@@ -83,8 +83,14 @@ class TestRecorder:
 
         return str(filepath)
 
-    def export_as_python(self, filename: str = None, test_name: str = None) -> str:
-        """Export recorded actions as executable Python test script."""
+    def export_as_python(self, filename: str = None, test_name: str = None, use_adb: bool = True) -> str:
+        """Export recorded actions as executable Python test script.
+
+        Args:
+            filename: Output filename
+            test_name: Name of the test
+            use_adb: If True, generate ADB-based script (independent). If False, use uiautomator2.
+        """
         if not filename:
             timestamp = self.start_time.strftime("%Y%m%d_%H%M%S")
             filename = f"test_{timestamp}.py"
@@ -94,7 +100,13 @@ class TestRecorder:
 
         filepath = Path(filename)
 
-        # Generate Python script content
+        if use_adb:
+            return self._export_as_adb_python(filepath, test_name)
+        else:
+            return self._export_as_uiautomator_python(filepath, test_name)
+
+    def _export_as_uiautomator_python(self, filepath: Path, test_name: str) -> str:
+        """Export as uiautomator2-based script (original behavior)."""
         script_lines = [
             '"""',
             f'Auto-generated test script: {test_name}',
@@ -121,7 +133,7 @@ class TestRecorder:
                     wait_before = f"    time.sleep({time_diff:.1f})\n"
 
             script_lines.append(wait_before)
-            script_lines.append(self._generate_action_code(action, i))
+            script_lines.append(self._generate_action_code_uiautomator(action, i))
 
         script_lines.extend([
             '',
@@ -136,8 +148,126 @@ class TestRecorder:
 
         return str(filepath)
 
-    def _generate_action_code(self, action: TestAction, action_num: int) -> str:
-        """Generate Python code for a single action."""
+    def _export_as_adb_python(self, filepath: Path, test_name: str) -> str:
+        """Export as ADB-based script (fully independent, no dependencies)."""
+        script_lines = [
+            '"""',
+            f'Auto-generated test script: {test_name}',
+            f'Generated: {self.start_time.isoformat()}',
+            f'Total actions: {len(self.actions)}',
+            '',
+            'This script uses direct ADB commands and is fully independent.',
+            'No external dependencies required beyond ADB.',
+            '"""',
+            '',
+            'import subprocess',
+            'import time',
+            'import sys',
+            '',
+            '',
+            'class DeviceController:',
+            '    """Direct ADB device controller - no external dependencies."""',
+            '    ',
+            '    def __init__(self, device_id="emulator-5554"):',
+            '        self.device_id = device_id',
+            '        self._verify_device()',
+            '    ',
+            '    def _verify_device(self):',
+            '        """Verify device is connected."""',
+            '        result = subprocess.run(["adb", "devices"], capture_output=True, text=True)',
+            '        if self.device_id not in result.stdout:',
+            '            raise Exception(f"Device {self.device_id} not found. Available devices:\\n{result.stdout}")',
+            '    ',
+            '    def click(self, x, y):',
+            '        """Click at coordinates."""',
+            '        cmd = f"adb -s {self.device_id} shell input tap {x} {y}"',
+            '        subprocess.run(cmd, shell=True)',
+            '    ',
+            '    def long_click(self, x, y, duration=1000):',
+            '        """Long click at coordinates."""',
+            '        cmd = f"adb -s {self.device_id} shell input touchscreen swipe {x} {y} {x} {y} {duration}"',
+            '        subprocess.run(cmd, shell=True)',
+            '    ',
+            '    def swipe(self, x1, y1, x2, y2, duration=300):',
+            '        """Swipe from one point to another."""',
+            '        cmd = f"adb -s {self.device_id} shell input touchscreen swipe {x1} {y1} {x2} {y2} {duration}"',
+            '        subprocess.run(cmd, shell=True)',
+            '    ',
+            '    def drag(self, x1, y1, x2, y2, duration=500):',
+            '        """Drag from one point to another."""',
+            '        cmd = f"adb -s {self.device_id} shell input touchscreen swipe {x1} {y1} {x2} {y2} {duration}"',
+            '        subprocess.run(cmd, shell=True)',
+            '    ',
+            '    def type_text(self, text):',
+            '        """Type text on device."""',
+            '        cmd = f"adb -s {self.device_id} shell input text \\"{text}\\""',
+            '        subprocess.run(cmd, shell=True)',
+            '    ',
+            '    def press_key(self, key_code):',
+            '        """Press a key code."""',
+            '        key_map = {',
+            '            "ENTER": "66",',
+            '            "BACK": "4",',
+            '            "HOME": "3",',
+            '            "MENU": "1",',
+            '            "POWER": "26",',
+            '            "VOLUME_UP": "24",',
+            '            "VOLUME_DOWN": "25",',
+            '        }',
+            '        code = key_map.get(key_code.upper(), key_code)',
+            '        cmd = f"adb -s {self.device_id} shell input keyevent {code}"',
+            '        subprocess.run(cmd, shell=True)',
+            '    ',
+            '    def open_notification(self):',
+            '        """Open notification bar."""',
+            '        cmd = f"adb -s {self.device_id} shell cmd statusbar expand-notifications"',
+            '        subprocess.run(cmd, shell=True)',
+            '    ',
+            '',
+            'def run_test(device_id="emulator-5554"):',
+            '    """Run the recorded test sequence."""',
+            '    print(f"Connecting to device: {device_id}")',
+            '    device = DeviceController(device_id)',
+            '    print("Device connected. Starting test...")',
+            '    ',
+        ]
+
+        for i, action in enumerate(self.actions, 1):
+            wait_before = ""
+            if i > 1:
+                prev_action = self.actions[i-2]
+                time_diff = action.timestamp - prev_action.timestamp
+                if time_diff > 0.5:  # Add delay if there was a significant gap
+                    wait_before = f"    time.sleep({time_diff:.1f})\n"
+
+            script_lines.append(wait_before)
+            script_lines.append(self._generate_action_code_adb(action, i))
+
+        script_lines.extend([
+            '    ',
+            '    print("Test completed successfully!")',
+            '',
+            '',
+            'if __name__ == "__main__":',
+            '    device_id = sys.argv[1] if len(sys.argv) > 1 else "emulator-5554"',
+            '    try:',
+            '        run_test(device_id)',
+            '    except KeyboardInterrupt:',
+            '        print("\\nTest interrupted by user")',
+            '    except Exception as e:',
+            '        print(f"Error: {e}")',
+            '        sys.exit(1)',
+        ])
+
+        script_content = '\n'.join(script_lines)
+
+        with open(filepath, 'w') as f:
+            f.write(script_content)
+
+        return str(filepath)
+
+    def _generate_action_code_uiautomator(self, action: TestAction, action_num: int) -> str:
+        """Generate Python code for a single action using uiautomator2."""
         params = action.parameters
         indent = "    "
 
@@ -160,6 +290,41 @@ class TestRecorder:
         elif action.action == "press":
             button = params["button"]
             return f'{indent}# Action {action_num}: Press {button} button\n{indent}device.press("{button}")'
+
+        elif action.action == "notification":
+            return f'{indent}# Action {action_num}: Open notification bar\n{indent}device.open_notification()'
+
+        elif action.action == "wait":
+            duration = params["duration"]
+            return f'{indent}# Action {action_num}: Wait {duration} seconds\n{indent}time.sleep({duration})'
+
+        else:
+            return f'{indent}# Action {action_num}: {action.action} {params}'
+
+    def _generate_action_code_adb(self, action: TestAction, action_num: int) -> str:
+        """Generate Python code for a single action using direct ADB commands."""
+        params = action.parameters
+        indent = "    "
+
+        if action.action == "click":
+            return f'{indent}# Action {action_num}: Click at ({params["x"]}, {params["y"]})\n{indent}device.click({params["x"]}, {params["y"]})'
+
+        elif action.action == "long_click":
+            return f'{indent}# Action {action_num}: Long click at ({params["x"]}, {params["y"]})\n{indent}device.long_click({params["x"]}, {params["y"]})'
+
+        elif action.action == "swipe":
+            return f'{indent}# Action {action_num}: Swipe from ({params["x1"]}, {params["y1"]}) to ({params["x2"]}, {params["y2"]})\n{indent}device.swipe({params["x1"]}, {params["y1"]}, {params["x2"]}, {params["y2"]})'
+
+        elif action.action == "type":
+            text = params["text"].replace('"', '\\"')
+            return f'{indent}# Action {action_num}: Type "{text}"\n{indent}device.type_text("{text}")'
+
+        elif action.action == "drag":
+            return f'{indent}# Action {action_num}: Drag from ({params["x1"]}, {params["y1"]}) to ({params["x2"]}, {params["y2"]})\n{indent}device.drag({params["x1"]}, {params["y1"]}, {params["x2"]}, {params["y2"]})'
+
+        elif action.action == "press":
+            button = params["button"]
+            return f'{indent}# Action {action_num}: Press {button} button\n{indent}device.press_key("{button}")'
 
         elif action.action == "notification":
             return f'{indent}# Action {action_num}: Open notification bar\n{indent}device.open_notification()'
