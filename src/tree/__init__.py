@@ -16,7 +16,6 @@ class Tree:
 
     def get_element_tree(self)->'Element':
         tree_string = self.mobile.device.dump_hierarchy()
-        print(tree_string)
         return ElementTree.fromstring(tree_string)
     
     def get_state(self)->TreeState:
