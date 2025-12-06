@@ -6,7 +6,10 @@
 
 ## Demo Video
 
-[![Android-MCP Demo](https://img.shields.io/badge/Watch-Demo%20Video-FF0000?style=for-the-badge&logo=youtube)](MCP%20video.mp4)
+<video width="800" controls>
+  <source src="MCP video.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
 
 Watch a quick demonstration of Android-MCP in action showing test recording and device control features.
 
