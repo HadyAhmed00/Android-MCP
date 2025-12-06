@@ -12,6 +12,8 @@
 - **Emulator Support**: Works with Android emulators (tested on emulator-5554)
 - **Physical Device Support**: Connect to real Android devices via ADB
 - **Vision Capabilities**: Generate annotated screenshots with numbered UI elements for vision-based AI agents
+- **Test Recording**: Record user interactions and export as executable test scripts (Python, JSON, or human-readable format)
+- **Test Script Export**: Export recorded tests in multiple formats for CI/CD integration
 
 ## Requirements
 
@@ -77,7 +79,7 @@ To use this with Claude Code or other MCP clients, add the following to your MCP
 
 ## Available Tools
 
-The MCP server exposes 9 tools for controlling Android devices:
+The MCP server exposes 14 tools for controlling Android devices and recording test cases:
 
 ### 1. **State-Tool**
 Get the current state of the device including UI hierarchy and optional screenshot.
@@ -188,6 +190,142 @@ Wait for a specified duration (useful for allowing apps to load).
 Wait for 2 seconds
 ```
 
+### 10. **Start-Recording-Tool**
+Start recording test actions for later export and playback.
+
+**Parameters:** None
+
+**Example:**
+```
+Start recording test actions
+```
+
+### 11. **Stop-Recording-Tool**
+Stop recording test actions.
+
+**Parameters:** None
+
+**Example:**
+```
+Stop recording and finalize test
+```
+
+### 12. **Export-Test-Script**
+Export recorded test actions as an executable test script in multiple formats.
+
+**Parameters:**
+- `format` (str): Export format - 'python', 'json', or 'readable' (default: 'python')
+- `filename` (str, optional): Custom filename without extension
+- `test_name` (str, optional): Custom test name for Python exports
+
+**Example:**
+```
+Export recorded actions as a Python test script
+```
+
+### 13. **Clear-Recording-Tool**
+Clear all recorded test actions.
+
+**Parameters:** None
+
+**Example:**
+```
+Clear the recording
+```
+
+### 14. **Get-Recording-Stats-Tool**
+Get statistics about recorded test actions.
+
+**Parameters:** None
+
+**Example:**
+```
+Show recording statistics
+```
+
+## Test Recording Workflow
+
+The test recording feature allows you to capture user interactions with Android devices and export them as executable test scripts. This is useful for:
+- **Automating Regression Testing**: Replay recorded user flows
+- **CI/CD Integration**: Run tests automatically in your pipeline
+- **Documentation**: Create executable documentation of app workflows
+- **Test Maintenance**: Easily update and maintain test scripts
+
+### Basic Test Recording Workflow
+
+1. **Start Recording:**
+   ```
+   Start recording test actions
+   ```
+   This initializes a new recording session.
+
+2. **Perform Device Actions:**
+   ```
+   Click, swipe, type, and interact with the device normally
+   ```
+   All actions are automatically recorded.
+
+3. **Stop Recording:**
+   ```
+   Stop recording and finalize test
+   ```
+   Recording is paused.
+
+4. **Export Test Script:**
+   ```
+   Export recorded actions as a Python test script
+   ```
+
+5. **Run the Generated Script:**
+   ```bash
+   python test_script_YYYYMMDD_HHMMSS.py
+   ```
+   Or with a custom device ID:
+   ```bash
+   python test_script_YYYYMMDD_HHMMSS.py emulator-5554
+   ```
+
+### Export Formats
+
+The test recorder supports three export formats:
+
+#### Python Format (Executable)
+Exports as a fully independent Python script using ADB commands. No external dependencies required.
+```bash
+Export recorded actions as Python
+```
+This generates a `test_*.py` file that can be executed directly.
+
+#### JSON Format (Data)
+Exports test data as JSON for integration with other tools.
+```bash
+Export recorded actions as JSON
+```
+This generates a `test_script_*.json` file with structured action data.
+
+#### Readable Format (Documentation)
+Exports test steps as human-readable text.
+```bash
+Export recorded actions as readable
+```
+This generates a `test_steps_*.txt` file with step-by-step descriptions.
+
+### Example: Recording a Login Flow
+
+```
+1. Start recording
+2. Get device state to see the login screen
+3. Click on the username field
+4. Type your username
+5. Click on the password field
+6. Type your password
+7. Click the login button
+8. Wait 2 seconds for login to complete
+9. Get device state to verify login success
+10. Stop recording
+11. Export as Python
+```
+
 ## Usage Workflow
 
 ### Basic Example: Navigate and Click
@@ -233,14 +371,27 @@ Wait for 2 seconds
 6. Get state to view device information
 ```
 
+## Video Documentation
+
+For visual walkthroughs and demonstrations of Android-MCP features, see the video documentation:
+
+- **[Setup & Installation](link-to-video-1)** - Getting started with Android-MCP installation and configuration
+- **[Basic Device Interaction](link-to-video-2)** - Demonstrating click, swipe, type, and other interactions
+- **[Test Recording Demo](link-to-video-3)** - How to record test cases and export as executable scripts
+- **[UI Hierarchy & Vision](link-to-video-4)** - Understanding UI hierarchy parsing and annotated screenshots
+- **[CI/CD Integration](link-to-video-5)** - Integrating recorded tests into your CI/CD pipeline
+
+**Note:** Replace the placeholder links with actual video URLs once they are uploaded to your documentation site or YouTube channel.
+
 ## Architecture
 
 The project is organized into three main modules:
 
 ### `main.py`
 - Entry point that creates the FastMCP server
-- Defines and exposes all 9 tools
+- Defines and exposes all 14 tools
 - Handles command-line arguments (`--emulator`)
+- Integrates test recording functionality
 
 ### `src/mobile/`
 - **Mobile class**: Manages device connection and state
@@ -252,6 +403,13 @@ The project is organized into three main modules:
 - Extracts interactive elements (buttons, inputs, etc.)
 - Generates annotated screenshots with numbered labels
 - Helper utilities for coordinate extraction
+
+### `src/recorder.py`
+- **TestRecorder class**: Records user actions during testing
+- **TestAction**: Data class representing a single action
+- Supports multiple export formats (Python, JSON, Readable)
+- Generates fully independent ADB-based Python scripts
+- Exports structured test data for CI/CD integration
 
 ## Troubleshooting
 
