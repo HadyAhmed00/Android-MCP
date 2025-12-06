@@ -4,6 +4,12 @@
 
 **Forked and customized by Hady Ahmed**
 
+## Demo Video
+
+[![Android-MCP Demo](https://img.shields.io/badge/Watch-Demo%20Video-FF0000?style=for-the-badge&logo=youtube)](MCP%20video.mp4)
+
+Watch a quick demonstration of Android-MCP in action showing test recording and device control features.
+
 ## Features
 
 - **Direct Device Control**: Click, swipe, drag, type, and press buttons on Android devices
