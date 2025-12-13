@@ -1,13 +1,28 @@
+import sys
+import os
+import warnings
+
+# Suppress warnings and stderr output that can interfere with MCP protocol
+warnings.filterwarnings('ignore')
+os.environ['PYTHONWARNINGS'] = 'ignore'
+
+# Redirect stderr to devnull to prevent library warnings from breaking MCP
+import io
+_original_stderr = sys.stderr
+sys.stderr = io.StringIO()
+
 from mcp.server.fastmcp import FastMCP,Image
-from contextlib import asynccontextmanager
 from argparse import ArgumentParser
 from src.mobile import Mobile
 from src.recorder import TestRecorder
 from textwrap import dedent
-import asyncio
+
+# Restore stderr after imports (optional, but can help with debugging)
+# sys.stderr = _original_stderr
 
 parser = ArgumentParser()
 parser.add_argument('--emulator',action='store_true',help='Use the emulator')
+parser.add_argument('--device',type=str,default=None,help='Specific device ID (e.g., b44fbcc9 or emulator-5554)')
 args = parser.parse_args()
 
 instructions=dedent('''
@@ -15,21 +30,21 @@ Android MCP server provides tools to interact directly with the Android device,
 thus enabling to operate the mobile device like an actual USER.
 It also includes test recording capabilities to capture and export test scripts.''')
 
-@asynccontextmanager
-async def lifespan(app: FastMCP):
-    """Runs initialization code before the server starts and cleanup code after it shuts down."""
-    await asyncio.sleep(1) # Simulate startup latency
-    yield
-
 mcp=FastMCP(name="Android-MCP",instructions=instructions)
 
-mobile=Mobile(device=None if not args.emulator else 'emulator-5554')
-device=mobile.get_device()
+# Determine device: explicit device > emulator flag > auto-detect
+device_id = args.device
+if device_id is None:
+    if args.emulator:
+        device_id = 'b44fbcc9'
+    # else: None means auto-detect (uiautomator2 will find default device)
+
+mobile=Mobile(device=device_id, use_mcp_helper=True)
 recorder=TestRecorder()
 
 @mcp.tool(name='Click-Tool',description='Click on a specific cordinate')
 def click_tool(x:int,y:int):
-    device.click(x,y)
+    mobile.get_device().click(x,y)
     recorder.record_action('click', {'x': x, 'y': y}, result=f'Clicked on ({x},{y})')
     return f'Clicked on ({x},{y})'
 
@@ -40,44 +55,44 @@ def state_tool(use_vision:bool=False):
 
 @mcp.tool(name='Long-Click-Tool',description='Long click on a specific cordinate')
 def long_click_tool(x:int,y:int):
-    device.long_click(x,y)
+    mobile.get_device().long_click(x,y)
     recorder.record_action('long_click', {'x': x, 'y': y}, result=f'Long Clicked on ({x},{y})')
     return f'Long Clicked on ({x},{y})'
 
 @mcp.tool(name='Swipe-Tool',description='Swipe on a specific cordinate')
 def swipe_tool(x1:int,y1:int,x2:int,y2:int):
-    device.swipe(x1,y1,x2,y2)
+    mobile.get_device().swipe(x1,y1,x2,y2)
     recorder.record_action('swipe', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2}, result=f'Swiped from ({x1},{y1}) to ({x2},{y2})')
     return f'Swiped from ({x1},{y1}) to ({x2},{y2})'
 
 @mcp.tool(name='Type-Tool',description='Type on a specific cordinate')
 def type_tool(text:str,x:int,y:int,clear:bool=False):
-    device.set_fastinput_ime(enable=True)
-    device.send_keys(text=text,clear=clear)
+    mobile.get_device().set_fastinput_ime(enable=True)
+    mobile.get_device().send_keys(text=text,clear=clear)
     recorder.record_action('type', {'text': text, 'x': x, 'y': y, 'clear': clear}, result=f'Typed "{text}" on ({x},{y})')
     return f'Typed "{text}" on ({x},{y})'
 
 @mcp.tool(name='Drag-Tool',description='Drag from location and drop on another location')
 def drag_tool(x1:int,y1:int,x2:int,y2:int):
-    device.drag(x1,y1,x2,y2)
+    mobile.get_device().drag(x1,y1,x2,y2)
     recorder.record_action('drag', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2}, result=f'Dragged from ({x1},{y1}) and dropped on ({x2},{y2})')
     return f'Dragged from ({x1},{y1}) and dropped on ({x2},{y2})'
 
 @mcp.tool(name='Press-Tool',description='Press on specific button on the device')
 def press_tool(button:str):
-    device.press(button)
+    mobile.get_device().press(button)
     recorder.record_action('press', {'button': button}, result=f'Pressed the "{button}" button')
     return f'Pressed the "{button}" button'
 
 @mcp.tool(name='Notification-Tool',description='Access the notifications seen on the device')
 def notification_tool():
-    device.open_notification()
+    mobile.get_device().open_notification()
     recorder.record_action('notification', {}, result='Accessed notification bar')
     return 'Accessed notification bar'
 
 @mcp.tool(name='Wait-Tool',description='Wait for a specific amount of time')
 def wait_tool(duration:int):
-    device.sleep(duration)
+    mobile.get_device().sleep(duration)
     recorder.record_action('wait', {'duration': duration}, result=f'Waited for {duration} seconds')
     return f'Waited for {duration} seconds'
 
@@ -155,3 +170,6 @@ def get_recording_stats_tool():
 
 if __name__ == '__main__':
     mcp.run()
+    #print the server have started and print alos the currnt working device
+    print('Server started on ' + mcp.get_url())
+    print('Current working device:', mobile.get_device().device_info)

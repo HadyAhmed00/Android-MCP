@@ -7,7 +7,11 @@
       "Bash(git commit:*)",
       "Bash(git checkout:*)",
       "Bash(git push:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(..venvScriptspython main.py)",
+      "Bash(python:*)",
+      "Bash(adb devices:*)",
+      "Bash(adb shell:*)"
     ],
     "deny": [],
     "ask": []
