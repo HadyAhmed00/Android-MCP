@@ -71,7 +71,7 @@ class DeviceController:
         subprocess.run(cmd, shell=True)
 
 
-def run_test(device_id="emulator-5554"):
+def run_test(device_id="b44fbcc9"):
     """Run the recorded test sequence."""
     print(f"Connecting to device: {device_id}")
     device = DeviceController(device_id)

@@ -36,7 +36,7 @@ mcp=FastMCP(name="Android-MCP",instructions=instructions)
 device_id = args.device
 if device_id is None:
     if args.emulator:
-        device_id = 'b44fbcc9'
+        device_id = 'emulator-5554'  
     # else: None means auto-detect (uiautomator2 will find default device)
 
 mobile=Mobile(device=device_id, use_mcp_helper=True)
