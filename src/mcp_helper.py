@@ -135,7 +135,7 @@ class AppInfo:
 class MCPHelperClient:
     """Client for communicating with MCP Helper Content Provider"""
 
-    PROVIDER_AUTHORITY = "com.HadyAhmed00.MCP_Helper"
+    PROVIDER_AUTHORITY = "com.droidrun.portal"
 
     def __init__(self, device_id: Optional[str] = None):
         """Initialize MCP Helper client
@@ -190,7 +190,7 @@ class MCPHelperClient:
         """Test connection to MCP Helper app"""
         uri = self._build_uri(ContentProviderEndpoint.PING.value)
         response = self._execute_query(uri)
-        return response.get("status") == "success" and response.get("data") == "pong"
+        return response.get("status") == "success" and response.get("result") == "pong"
 
     def get_version(self) -> str:
         """Get MCP Helper app version"""
@@ -198,7 +198,7 @@ class MCPHelperClient:
         response = self._execute_query(uri)
         if response.get("status") != "success":
             raise RuntimeError("Failed to get version")
-        return response.get("data", "unknown")
+        return response.get("result", "unknown")
 
     def get_a11y_tree(self) -> List[A11yTreeNode]:
         """Get filtered accessibility tree with overlay indices
@@ -211,7 +211,9 @@ class MCPHelperClient:
         if response.get("status") != "success":
             raise RuntimeError("Failed to get a11y_tree")
 
-        data = json.loads(response.get("data", "[]"))
+        data = response.get("result", "[]")
+        if isinstance(data, str):
+            data = json.loads(data)
         return self._parse_a11y_tree_nodes(data)
 
     def get_a11y_tree_full(self, include_small: bool = True) -> A11yFullNode:
@@ -230,7 +232,9 @@ class MCPHelperClient:
         if response.get("status") != "success":
             raise RuntimeError("Failed to get a11y_tree_full")
 
-        data = json.loads(response.get("data", "{}"))
+        data = response.get("result", "{}")
+        if isinstance(data, str):
+            data = json.loads(data)
         return self._parse_a11y_full_node(data)
 
     def get_phone_state(self) -> PhoneState:
@@ -244,7 +248,9 @@ class MCPHelperClient:
         if response.get("status") != "success":
             raise RuntimeError("Failed to get phone_state")
 
-        data = json.loads(response.get("data", "{}"))
+        data = response.get("result", "{}")
+        if isinstance(data, str):
+            data = json.loads(data)
         return PhoneState(
             packageName=data.get("packageName", ""),
             activityName=data.get("activityName", ""),
@@ -268,7 +274,9 @@ class MCPHelperClient:
         if response.get("status") != "success":
             raise RuntimeError("Failed to get state")
 
-        data = json.loads(response.get("data", "{}"))
+        data = response.get("result", "{}")
+        if isinstance(data, str):
+            data = json.loads(data)
         return data
 
     def get_packages(self) -> List[AppInfo]:
@@ -282,7 +290,9 @@ class MCPHelperClient:
         if response.get("status") != "success":
             raise RuntimeError("Failed to get packages")
 
-        packages_data = response.get("packages", [])
+        packages_data = response.get("result", [])
+        if isinstance(packages_data, str):
+            packages_data = json.loads(packages_data)
         return [
             AppInfo(
                 packageName=pkg.get("packageName", ""),

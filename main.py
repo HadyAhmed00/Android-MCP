@@ -1,6 +1,8 @@
 import sys
 import os
 import warnings
+import subprocess
+import time
 
 # Suppress warnings and stderr output that can interfere with MCP protocol
 warnings.filterwarnings('ignore')
@@ -42,9 +44,22 @@ if device_id is None:
 mobile=Mobile(device=device_id, use_mcp_helper=True)
 recorder=TestRecorder()
 
+# Helper function to execute ADB commands without using uiautomator2's accessibility service
+def adb_shell(command: str) -> str:
+    """Execute ADB shell command using the configured device."""
+    cmd = ["adb"]
+    if device_id:
+        cmd.extend(["-s", device_id])
+    cmd.extend(["shell", command])
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    if result.returncode != 0:
+        raise RuntimeError(f"ADB command failed: {result.stderr}")
+    return result.stdout.strip()
+
 @mcp.tool(name='Click-Tool',description='Click on a specific cordinate')
 def click_tool(x:int,y:int):
-    mobile.get_device().click(x,y)
+    # Use ADB input tap instead of uiautomator2 to avoid accessibility service conflict
+    adb_shell(f"input tap {x} {y}")
     recorder.record_action('click', {'x': x, 'y': y}, result=f'Clicked on ({x},{y})')
     return f'Clicked on ({x},{y})'
 
@@ -55,44 +70,65 @@ def state_tool(use_vision:bool=False):
 
 @mcp.tool(name='Long-Click-Tool',description='Long click on a specific cordinate')
 def long_click_tool(x:int,y:int):
-    mobile.get_device().long_click(x,y)
+    # Use ADB input swipe with long duration to simulate long click
+    adb_shell(f"input swipe {x} {y} {x} {y} 1000")
     recorder.record_action('long_click', {'x': x, 'y': y}, result=f'Long Clicked on ({x},{y})')
     return f'Long Clicked on ({x},{y})'
 
 @mcp.tool(name='Swipe-Tool',description='Swipe on a specific cordinate')
 def swipe_tool(x1:int,y1:int,x2:int,y2:int):
-    mobile.get_device().swipe(x1,y1,x2,y2)
+    # Use ADB input swipe
+    adb_shell(f"input swipe {x1} {y1} {x2} {y2} 300")
     recorder.record_action('swipe', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2}, result=f'Swiped from ({x1},{y1}) to ({x2},{y2})')
     return f'Swiped from ({x1},{y1}) to ({x2},{y2})'
 
 @mcp.tool(name='Type-Tool',description='Type on a specific cordinate')
 def type_tool(text:str,x:int,y:int,clear:bool=False):
-    mobile.get_device().set_fastinput_ime(enable=True)
-    mobile.get_device().send_keys(text=text,clear=clear)
+    # First click on the coordinates to focus the input field
+    adb_shell(f"input tap {x} {y}")
+    # Use ADB input text for typing (simpler and doesn't require IME setup)
+    # Note: Special characters may need escaping
+    escaped_text = text.replace(' ', '%s').replace("'", "\\'")
+    adb_shell(f"input text '{escaped_text}'")
     recorder.record_action('type', {'text': text, 'x': x, 'y': y, 'clear': clear}, result=f'Typed "{text}" on ({x},{y})')
     return f'Typed "{text}" on ({x},{y})'
 
 @mcp.tool(name='Drag-Tool',description='Drag from location and drop on another location')
 def drag_tool(x1:int,y1:int,x2:int,y2:int):
-    mobile.get_device().drag(x1,y1,x2,y2)
+    # Use ADB input swipe with longer duration for drag
+    adb_shell(f"input swipe {x1} {y1} {x2} {y2} 500")
     recorder.record_action('drag', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2}, result=f'Dragged from ({x1},{y1}) and dropped on ({x2},{y2})')
     return f'Dragged from ({x1},{y1}) and dropped on ({x2},{y2})'
 
 @mcp.tool(name='Press-Tool',description='Press on specific button on the device')
 def press_tool(button:str):
-    mobile.get_device().press(button)
+    # Map button names to Android keycodes
+    keycode_map = {
+        'home': 'KEYCODE_HOME',
+        'back': 'KEYCODE_BACK',
+        'menu': 'KEYCODE_MENU',
+        'power': 'KEYCODE_POWER',
+        'volume_up': 'KEYCODE_VOLUME_UP',
+        'volume_down': 'KEYCODE_VOLUME_DOWN',
+        'enter': 'KEYCODE_ENTER',
+        'delete': 'KEYCODE_DEL',
+    }
+    keycode = keycode_map.get(button.lower(), button)
+    adb_shell(f"input keyevent {keycode}")
     recorder.record_action('press', {'button': button}, result=f'Pressed the "{button}" button')
     return f'Pressed the "{button}" button'
 
 @mcp.tool(name='Notification-Tool',description='Access the notifications seen on the device')
 def notification_tool():
-    mobile.get_device().open_notification()
+    # Open notification panel by swiping down from top or using service call
+    adb_shell("cmd statusbar expand-notifications")
     recorder.record_action('notification', {}, result='Accessed notification bar')
     return 'Accessed notification bar'
 
 @mcp.tool(name='Wait-Tool',description='Wait for a specific amount of time')
 def wait_tool(duration:int):
-    mobile.get_device().sleep(duration)
+    # Use Python's time.sleep instead of uiautomator2 to avoid accessibility service conflict
+    time.sleep(duration)
     recorder.record_action('wait', {'duration': duration}, result=f'Waited for {duration} seconds')
     return f'Waited for {duration} seconds'
 

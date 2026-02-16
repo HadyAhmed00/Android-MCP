@@ -7,6 +7,9 @@ import time
 from typing import Optional
 from src.mcp_helper import MCPHelperClient
 from src.mcp_helper_adapter import MCPHelperMobileAdapter
+import subprocess
+import tempfile
+import os
 
 class Mobile:
     def __init__(self, device: str = None, use_mcp_helper: bool = True):
@@ -128,12 +131,24 @@ class Mobile:
             raise RuntimeError(f"Failed to get device state: {e}")
     
     def get_screenshot(self,scale:float=0.7)->Image.Image:
-        self._ensure_connected()
         try:
-            screenshot=self.device.screenshot()
+            # Use ADB screencap instead of uiautomator2 to avoid accessibility service conflict
+            # Capture screenshot using ADB
+            cmd = ["adb"]
+            if self.device_id:
+                cmd.extend(["-s", self.device_id])
+            cmd.extend(["exec-out", "screencap", "-p"])
+
+            result = subprocess.run(cmd, capture_output=True, timeout=10)
+            if result.returncode != 0:
+                raise RuntimeError(f"Screenshot capture failed: {result.stderr}")
+
+            # Load image directly from bytes (avoiding temp file issues on Windows)
+            screenshot = Image.open(BytesIO(result.stdout))
             if screenshot is None:
                 raise ValueError("Screenshot capture returned None.")
-            size=(screenshot.width*scale, screenshot.height*scale)
+
+            size = (int(screenshot.width * scale), int(screenshot.height * scale))
             screenshot.thumbnail(size=size, resample=Image.Resampling.LANCZOS)
             return screenshot
         except Exception as e:
