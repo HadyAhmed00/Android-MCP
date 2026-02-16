@@ -3,6 +3,7 @@ import os
 import warnings
 import subprocess
 import time
+import shlex
 
 # Suppress warnings and stderr output that can interfere with MCP protocol
 warnings.filterwarnings('ignore')
@@ -203,6 +204,229 @@ def get_recording_stats_tool():
         stats += f'  - {action_type}: {count}\n'
 
     return stats
+
+@mcp.tool(name='Report-Bug-To-Azure',description='Report a bug to Azure DevOps using Azure CLI with proper bug report structure (generates command to run)')
+def report_bug_to_azure_command(
+    title: str,
+    steps_to_reproduce: str,
+    expected_result: str,
+    actual_result: str,
+    description: str = "",
+    project: str = None,
+    parent_user_story: str = None,
+    severity: str = "3 - Medium",
+    priority: int = 2,
+    environment: str = None
+):
+    """
+    Generate Azure CLI command to report a bug (for manual execution).
+    This avoids subprocess hanging issues.
+    """
+    # Auto-detect device environment if not provided
+    if not environment:
+        try:
+            device_info = mobile.get_device().device_info
+            environment = f"Device: {device_info.get('brand', 'Unknown')} {device_info.get('model', 'Unknown')}\n"
+            environment += f"OS Version: Android {device_info.get('version', 'Unknown')}\n"
+            environment += f"SDK: {device_info.get('sdk', 'Unknown')}"
+        except:
+            environment = "Device info not available"
+
+    # Build comprehensive bug description
+    bug_description = ""
+    if description:
+        bug_description += f"**Description:**\\n{description}\\n\\n"
+    bug_description += f"**Steps to Reproduce:**\\n{steps_to_reproduce}\\n\\n"
+    bug_description += f"**Expected Result:**\\n{expected_result}\\n\\n"
+    bug_description += f"**Actual Result:**\\n{actual_result}\\n\\n"
+    bug_description += f"**Environment:**\\n{environment}\\n\\n"
+
+    # Build the command string
+    cmd = f'az boards work-item create --type Bug --title "{title}" --description "{bug_description}"'
+
+    if project:
+        cmd += f' --project "{project}"'
+
+    fields = f"Microsoft.VSTS.Common.Severity={severity} Microsoft.VSTS.Common.Priority={priority}"
+    if parent_user_story:
+        fields += f" System.Parent={parent_user_story}"
+
+    cmd += f' --fields {fields}'
+
+    result = f"""
+📋 Bug Report Ready!
+
+**Title:** {title}
+**Severity:** {severity}
+**Priority:** {priority}
+**Project:** {project or "Default"}
+**Parent Story:** #{parent_user_story if parent_user_story else "None"}
+
+🔧 **Run this command in your terminal:**
+
+```bash
+{cmd}
+```
+
+Or copy this multi-line version for better readability:
+
+```bash
+az boards work-item create \\
+  --type Bug \\
+  --title "{title}" \\
+  --description "{bug_description}" \\
+  {f'--project "{project}" \\' if project else ''}  --fields "Microsoft.VSTS.Common.Severity={severity}" "Microsoft.VSTS.Common.Priority={priority}" {f'"System.Parent={parent_user_story}"' if parent_user_story else ''}
+```
+"""
+    return result
+
+@mcp.tool(name='Report-Bug-To-Azure-Direct',description='[EXPERIMENTAL] Report a bug to Azure DevOps - direct execution (may hang)')
+def report_bug_to_azure(
+    title: str,
+    steps_to_reproduce: str,
+    expected_result: str,
+    actual_result: str,
+    description: str = "",
+    project: str = None,
+    parent_user_story: str = None,
+    severity: str = "3 - Medium",
+    priority: int = 2,
+    environment: str = None
+):
+    """
+    Report a bug to Azure DevOps using Azure CLI with proper bug report structure.
+
+    Parameters:
+    - title: Bug title (required) - Short, clear description of the issue
+    - steps_to_reproduce: Clear steps to replicate the bug (required)
+    - expected_result: What should happen (required)
+    - actual_result: What actually happened (required)
+    - description: Additional context or details (optional)
+    - project: Azure DevOps project name (optional, uses default if not specified)
+    - parent_user_story: Parent user story ID to link this bug to (optional)
+    - severity: Bug severity (default: "3 - Medium")
+    - priority: Bug priority 1-4 (default: 2)
+    - environment: Device/OS/App version info (optional)
+    """
+    try:
+        # First, test if Azure CLI is accessible
+        try:
+            test_result = subprocess.run("az --version", capture_output=True, text=True, timeout=5, shell=True)
+            if test_result.returncode != 0:
+                return "❌ Error: Azure CLI is not responding. Please ensure it's properly installed and configured."
+        except subprocess.TimeoutExpired:
+            return "❌ Error: Azure CLI is not responding (timeout). Please check your Azure CLI installation."
+        except Exception as e:
+            return f"❌ Error: Cannot access Azure CLI: {str(e)}"
+
+        # Auto-detect device environment if not provided
+        if not environment:
+            try:
+                # Get device info from mobile instance
+                device_info = mobile.get_device().device_info
+                environment = f"Device: {device_info.get('brand', 'Unknown')} {device_info.get('model', 'Unknown')}\n"
+                environment += f"OS Version: Android {device_info.get('version', 'Unknown')}\n"
+                environment += f"SDK: {device_info.get('sdk', 'Unknown')}"
+            except:
+                environment = "Device info not available"
+
+        # Build comprehensive bug description
+        bug_description = ""
+
+        if description:
+            bug_description += f"**Description:**\n{description}\n\n"
+
+        bug_description += f"**Steps to Reproduce:**\n{steps_to_reproduce}\n\n"
+        bug_description += f"**Expected Result:**\n{expected_result}\n\n"
+        bug_description += f"**Actual Result:**\n{actual_result}\n\n"
+        bug_description += f"**Environment:**\n{environment}\n\n"
+
+        # Build the Azure CLI command
+        cmd = ["az", "boards", "work-item", "create", "--type", "Bug"]
+
+        # Add title
+        cmd.extend(["--title", title])
+
+        # Add the structured description
+        cmd.extend(["--description", bug_description])
+
+        # Add project if specified
+        if project:
+            cmd.extend(["--project", project])
+
+        # Add fields for severity and priority
+        fields = [
+            f"Microsoft.VSTS.Common.Severity={severity}",
+            f"Microsoft.VSTS.Common.Priority={priority}"
+        ]
+
+        # Add parent user story if specified
+        if parent_user_story:
+            fields.append(f"System.Parent={parent_user_story}")
+
+        # Add all fields
+        for field in fields:
+            cmd.extend(["--fields", field])
+
+        # Add output format and suppress warnings
+        cmd.extend(["--output", "json", "--only-show-errors"])
+
+        # Execute the command (shell=True for Windows compatibility)
+        # Properly quote arguments for shell execution
+        try:
+            cmd_string = shlex.join(cmd)  # Python 3.8+
+        except AttributeError:
+            # Fallback for older Python versions
+            cmd_string = " ".join(shlex.quote(arg) for arg in cmd)
+
+        # Reduced timeout to 15 seconds to avoid long waits
+        result = subprocess.run(cmd_string, capture_output=True, text=True, timeout=15, shell=True)
+
+        if result.returncode != 0:
+            error_msg = result.stderr.strip()
+
+            # Check for common errors and provide helpful messages
+            if "not logged in" in error_msg.lower() or "authentication" in error_msg.lower():
+                return "❌ Error: Not logged in to Azure. Please run 'az login' first."
+            elif "project" in error_msg.lower() and "not found" in error_msg.lower():
+                return f"❌ Error: Project '{project}' not found. Please specify a valid project name or use the default project."
+            elif "az boards" in error_msg:
+                return "❌ Error: Azure DevOps extension not found. Please install it with: az extension add --name azure-devops"
+            else:
+                return f"❌ Error creating bug in Azure DevOps:\n{error_msg}"
+
+        # Parse the response
+        import json
+        response = json.loads(result.stdout)
+        bug_id = response.get("id", "Unknown")
+        bug_url = response.get("url", "")
+
+        success_msg = f"✅ Bug reported successfully to Azure DevOps!\n\n"
+        success_msg += f"📋 Bug ID: #{bug_id}\n"
+        success_msg += f"📝 Title: {title}\n"
+        success_msg += f"⚠️ Severity: {severity} | Priority: {priority}\n"
+        if project:
+            success_msg += f"🗂️ Project: {project}\n"
+        if parent_user_story:
+            success_msg += f"🔗 Linked to User Story: #{parent_user_story}\n"
+        success_msg += f"\n📊 Bug Report Structure:\n"
+        success_msg += f"   ✓ Steps to Reproduce\n"
+        success_msg += f"   ✓ Expected Result\n"
+        success_msg += f"   ✓ Actual Result\n"
+        success_msg += f"   ✓ Environment Info\n"
+        if bug_url:
+            success_msg += f"\n🔗 View in Azure DevOps: {bug_url}\n"
+
+        return success_msg
+
+    except FileNotFoundError:
+        return "❌ Error: Azure CLI not found. Please install Azure CLI first: https://aka.ms/installazurecliwindows"
+    except subprocess.TimeoutExpired:
+        return "❌ Error: Command timed out after 15 seconds. This might be due to:\n  - Network connectivity issues\n  - Azure CLI waiting for authentication\n  - Large project size\nPlease check 'az login' status and try again."
+    except json.JSONDecodeError:
+        return f"❌ Error: Failed to parse Azure CLI response. Output:\n{result.stdout}"
+    except Exception as e:
+        return f"❌ Unexpected error: {str(e)}"
 
 if __name__ == '__main__':
     mcp.run()
