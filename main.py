@@ -232,26 +232,41 @@ def report_bug_to_azure_command(
         except:
             environment = "Device info not available"
 
-    # Build comprehensive bug description
-    bug_description = ""
+    # Build the Description or Steps field (Custom.DescriptionorSteps)
+    description_steps = ""
     if description:
-        bug_description += f"**Description:**\\n{description}\\n\\n"
-    bug_description += f"**Steps to Reproduce:**\\n{steps_to_reproduce}\\n\\n"
-    bug_description += f"**Expected Result:**\\n{expected_result}\\n\\n"
-    bug_description += f"**Actual Result:**\\n{actual_result}\\n\\n"
-    bug_description += f"**Environment:**\\n{environment}\\n\\n"
+        description_steps += f"<p>{description}</p>"
+    description_steps += f"<p><strong>Steps to Reproduce:</strong></p>"
+    description_steps += f"<ol>"
+    for step in steps_to_reproduce.split("\n"):
+        step = step.strip()
+        if step:
+            # Remove leading number/dot/dash if present
+            import re
+            step_text = re.sub(r'^[\d]+[\.\)\-\s]+', '', step).strip()
+            if step_text:
+                description_steps += f"<li>{step_text}</li>"
+    description_steps += f"</ol>"
+    if environment:
+        description_steps += f"<p><strong>Environment:</strong> {environment}</p>"
 
     # Build the command string
-    cmd = f'az boards work-item create --type Bug --title "{title}" --description "{bug_description}"'
+    cmd = f'az boards work-item create --type Bug --title "{title}"'
 
     if project:
         cmd += f' --project "{project}"'
 
-    fields = f"Microsoft.VSTS.Common.Severity={severity} Microsoft.VSTS.Common.Priority={priority}"
-    if parent_user_story:
-        fields += f" System.Parent={parent_user_story}"
+    # Wrap actual_result and expected_result in HTML for proper rendering
+    actual_result_html = f'<div><span style="display:inline !important;">{actual_result}</span><br> </div>'
+    expected_result_html = f'<div><span style="display:inline !important;">{expected_result}</span><br> </div>'
 
-    cmd += f' --fields {fields}'
+    cmd += f' --fields "Custom.DescriptionorSteps={description_steps}"'
+    cmd += f' "Microsoft.VSTS.TCM.ReproSteps={actual_result_html}"'
+    cmd += f' "Microsoft.VSTS.TCM.SystemInfo={expected_result_html}"'
+    cmd += f' "Microsoft.VSTS.Common.Severity={severity}"'
+    cmd += f' "Microsoft.VSTS.Common.Priority={priority}"'
+    if parent_user_story:
+        cmd += f' "System.Parent={parent_user_story}"'
 
     result = f"""
 📋 Bug Report Ready!
@@ -266,16 +281,6 @@ def report_bug_to_azure_command(
 
 ```bash
 {cmd}
-```
-
-Or copy this multi-line version for better readability:
-
-```bash
-az boards work-item create \\
-  --type Bug \\
-  --title "{title}" \\
-  --description "{bug_description}" \\
-  {f'--project "{project}" \\' if project else ''}  --fields "Microsoft.VSTS.Common.Severity={severity}" "Microsoft.VSTS.Common.Priority={priority}" {f'"System.Parent={parent_user_story}"' if parent_user_story else ''}
 ```
 """
     return result
@@ -330,16 +335,21 @@ def report_bug_to_azure(
             except:
                 environment = "Device info not available"
 
-        # Build comprehensive bug description
-        bug_description = ""
-
+        # Build the Description or Steps field as HTML (Custom.DescriptionorSteps)
+        import re
+        description_steps = ""
         if description:
-            bug_description += f"**Description:**\n{description}\n\n"
-
-        bug_description += f"**Steps to Reproduce:**\n{steps_to_reproduce}\n\n"
-        bug_description += f"**Expected Result:**\n{expected_result}\n\n"
-        bug_description += f"**Actual Result:**\n{actual_result}\n\n"
-        bug_description += f"**Environment:**\n{environment}\n\n"
+            description_steps += f"<p>{description}</p>"
+        description_steps += "<p><strong>Steps to Reproduce:</strong></p><ol>"
+        for step in steps_to_reproduce.split("\n"):
+            step = step.strip()
+            if step:
+                step_text = re.sub(r'^[\d]+[\.\)\-\s]+', '', step).strip()
+                if step_text:
+                    description_steps += f"<li>{step_text}</li>"
+        description_steps += "</ol>"
+        if environment:
+            description_steps += f"<p><strong>Environment:</strong> {environment}</p>"
 
         # Build the Azure CLI command
         cmd = ["az", "boards", "work-item", "create", "--type", "Bug"]
@@ -347,15 +357,19 @@ def report_bug_to_azure(
         # Add title
         cmd.extend(["--title", title])
 
-        # Add the structured description
-        cmd.extend(["--description", bug_description])
-
         # Add project if specified
         if project:
             cmd.extend(["--project", project])
 
-        # Add fields for severity and priority
+        # Wrap actual_result and expected_result in HTML for proper rendering
+        actual_result_html = f"<div><span style=\"display:inline !important;\">{actual_result}</span><br> </div>"
+        expected_result_html = f"<div><span style=\"display:inline !important;\">{expected_result}</span><br> </div>"
+
+        # Use the correct Azure DevOps fields matching the board layout
         fields = [
+            f"Custom.DescriptionorSteps={description_steps}",
+            f"Microsoft.VSTS.TCM.ReproSteps={actual_result_html}",
+            f"Microsoft.VSTS.TCM.SystemInfo={expected_result_html}",
             f"Microsoft.VSTS.Common.Severity={severity}",
             f"Microsoft.VSTS.Common.Priority={priority}"
         ]
