@@ -4,6 +4,7 @@ import warnings
 import subprocess
 import time
 import shlex
+import re
 
 # Suppress warnings and stderr output that can interfere with MCP protocol
 warnings.filterwarnings('ignore')
@@ -44,6 +45,7 @@ if device_id is None:
 
 mobile=Mobile(device=device_id, use_mcp_helper=True)
 recorder=TestRecorder()
+_sensitive_counter = 0
 
 # Helper function to execute ADB commands without using uiautomator2's accessibility service
 def adb_shell(command: str) -> str:
@@ -62,19 +64,30 @@ def _find_element(text, index=0):
     Returns a tuple of (element, error_message).
     If element is found, error_message is None.
     If element is not found, element is None and error_message describes the problem.
+    Matches against both real names and scrubbed names so agents using
+    scrubbed text from State-Tool can still find elements.
     """
     mobile_state = mobile.get_state()
     elements = mobile_state.tree_state.interactive_elements
 
+    # Build unique scrub mapping for collision-safe matching
+    all_names = [e.name for e in elements]
+    scrub_map = _scrub_pii_unique(all_names)
+
     matches = []
     for element in elements:
+        # Match against real name (normal case)
         if text.lower() in element.name.lower():
+            matches.append(element)
+        # Also match against unique scrubbed name (when agent uses scrubbed text from State-Tool)
+        elif text.lower() in scrub_map.get(element.name, '').lower():
             matches.append(element)
 
     if not matches:
+        # Scrub available element names in error response to avoid leaking PII
         available_names = []
         for element in elements[:20]:
-            available_names.append('"' + element.name + '"')
+            available_names.append('"' + scrub_map.get(element.name, element.name) + '"')
         available_str = ', '.join(available_names)
         return None, 'Element "' + text + '" not found. Available elements: ' + available_str
 
@@ -82,6 +95,132 @@ def _find_element(text, index=0):
         return None, 'Index ' + str(index) + ' out of range. Found ' + str(len(matches)) + ' matches for "' + text + '".'
 
     return matches[index], None
+
+def _mask_email(local, domain, reveal=None):
+    """Mask an email local part, keeping 'reveal' chars from start + last char.
+    Default reveal scales with local length to always mask at least 1 char.
+    If reveal >= len(local)-1, returns full local (no masking possible)."""
+    if len(local) <= 2:
+        return local[0] + '*@' + domain
+    if reveal is None:
+        # Default: reveal roughly half, minimum 1, always leave room for at least 1 star
+        reveal = min(3, len(local) - 2)
+    if reveal >= len(local) - 1:
+        # Can't mask anymore, return full local
+        return local + '@' + domain
+    masked_count = len(local) - reveal - 1
+    return local[:reveal] + '*' * masked_count + local[-1] + '@' + domain
+
+def _mask_phone(digits, reveal=4):
+    """Mask a phone number, keeping last 'reveal' digits."""
+    if len(digits) <= reveal:
+        return digits
+    return '***-***-' + digits[-reveal:]
+
+def _mask_card(digits, reveal_start=4, reveal_end=4):
+    """Mask a credit card, keeping first reveal_start and last reveal_end digits."""
+    if len(digits) <= reveal_start + reveal_end:
+        return digits
+    return digits[:reveal_start] + '-****-' + digits[-reveal_end:]
+
+def _scrub_pii(text):
+    """Scrub sensitive patterns from text before sending to MCP response.
+    Masks emails, phone numbers, and credit card-like numbers.
+    Only used on outward-facing strings, not internal element data."""
+    # Email: keep first 3 chars + last char before @ + domain
+    def _email_replacer(m):
+        local = m.group(0).split('@')[0]
+        domain = m.group(1)
+        return _mask_email(local, domain)
+    text = re.sub(
+        r'[a-zA-Z0-9._%+-]+@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+        _email_replacer,
+        text
+    )
+    # Credit card-like: 13-19 digit sequences (with optional spaces/dashes)
+    def _card_replacer(m):
+        digits = re.sub(r'[\s-]', '', m.group(0))
+        if len(digits) < 8:
+            return m.group(0)
+        return _mask_card(digits)
+    text = re.sub(
+        r'\b(\d{4})[\s-]?(\d{4})[\s-]?(\d{4})[\s-]?(\d{1,7})\b',
+        _card_replacer,
+        text
+    )
+    # Phone numbers: keep last 4 digits
+    def _phone_replacer(m):
+        digits = re.sub(r'[^\d]', '', m.group(0))
+        if len(digits) < 4:
+            return m.group(0)
+        return _mask_phone(digits)
+    text = re.sub(
+        r'(?<!\d)(\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}(?!\d)',
+        _phone_replacer,
+        text
+    )
+    return text
+
+def _scrub_pii_unique(names):
+    """Scrub a list of element names and resolve any collisions by revealing
+    more characters until each scrubbed name is unique.
+    Returns a dict mapping original name -> unique scrubbed name."""
+    result = {}
+    # First pass: standard scrub
+    for name in names:
+        result[name] = _scrub_pii(name)
+
+    # Find collisions and resolve them by revealing more characters
+    # Group names by their scrubbed output
+    for _attempt in range(5):  # max 5 rounds of collision resolution
+        scrubbed_groups = {}
+        for original, scrubbed in result.items():
+            if scrubbed not in scrubbed_groups:
+                scrubbed_groups[scrubbed] = []
+            scrubbed_groups[scrubbed].append(original)
+
+        has_collision = False
+        for scrubbed, originals in scrubbed_groups.items():
+            if len(originals) <= 1:
+                continue
+            has_collision = True
+            # Resolve by revealing one more character for each pattern
+            for original in originals:
+                current = result[original]
+                # Try revealing more chars in emails
+                email_match = re.search(r'[a-zA-Z0-9._%+-]+@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', original)
+                if email_match:
+                    local = original[email_match.start():email_match.end()].split('@')[0]
+                    domain = email_match.group(1)
+                    # Find current reveal level by counting leading non-* chars before the first *
+                    current_local = current[current.find(local[0]):current.find('@')]
+                    star_pos = current_local.find('*')
+                    if star_pos == -1:
+                        # Fully revealed already, can't unmask further
+                        continue
+                    current_reveal = star_pos
+                    result[original] = re.sub(
+                        r'[a-zA-Z0-9*._%-]+@' + re.escape(domain),
+                        _mask_email(local, domain, reveal=current_reveal + 1),
+                        current
+                    )
+                    continue
+                # Try revealing more digits in phone numbers
+                phone_match = re.search(r'(?<!\d)(\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}(?!\d)', original)
+                if phone_match:
+                    digits = re.sub(r'[^\d]', '', phone_match.group(0))
+                    current_phone = re.search(r'\*{3}-\*{3}-(\d+)', current)
+                    current_reveal = len(current_phone.group(1)) if current_phone else 4
+                    result[original] = current.replace(
+                        '***-***-' + digits[-current_reveal:],
+                        _mask_phone(digits, reveal=min(current_reveal + 2, len(digits)))
+                    )
+                    continue
+
+        if not has_collision:
+            break
+
+    return result
 
 @mcp.tool(name='Click-Tool',description='Click on a specific cordinate')
 def click_tool(x:int,y:int):
@@ -98,8 +237,9 @@ def click_element_tool(text:str,index:int=0):
     x = element.coordinates.x
     y = element.coordinates.y
     adb_shell(f"input tap {x} {y}")
-    recorder.record_action('click_element', {'text': text, 'index': index, 'x': x, 'y': y}, result=f'Clicked on element "{element.name}" at ({x},{y})')
-    return f'Clicked on element "{element.name}" at ({x},{y})'
+    scrubbed_name = _scrub_pii(element.name)
+    recorder.record_action('click_element', {'text': text, 'index': index, 'x': x, 'y': y}, result=f'Clicked on element "{scrubbed_name}" at ({x},{y})')
+    return f'Clicked on element "{scrubbed_name}" at ({x},{y})'
 
 @mcp.tool(name='Long-Click-Element-Tool',description='Long click on an element by its name or text instead of coordinates. Finds the element on screen and long clicks its center. Use index parameter when multiple elements share the same name.')
 def long_click_element_tool(text:str,index:int=0):
@@ -109,11 +249,12 @@ def long_click_element_tool(text:str,index:int=0):
     x = element.coordinates.x
     y = element.coordinates.y
     adb_shell(f"input swipe {x} {y} {x} {y} 1000")
-    recorder.record_action('long_click_element', {'text': text, 'index': index, 'x': x, 'y': y}, result=f'Long Clicked on element "{element.name}" at ({x},{y})')
-    return f'Long Clicked on element "{element.name}" at ({x},{y})'
+    scrubbed_name = _scrub_pii(element.name)
+    recorder.record_action('long_click_element', {'text': text, 'index': index, 'x': x, 'y': y}, result=f'Long Clicked on element "{scrubbed_name}" at ({x},{y})')
+    return f'Long Clicked on element "{scrubbed_name}" at ({x},{y})'
 
-@mcp.tool(name='Type-Element-Tool',description='Find an input field by its name or text, tap it to focus, and type text into it. Use index parameter when multiple elements share the same name.')
-def type_element_tool(input_text:str,element_text:str,index:int=0):
+@mcp.tool(name='Type-Element-Tool',description='Find an input field by its name or text, tap it to focus, and type text into it. Set sensitive=True for passwords or private data to prevent the typed text from appearing in responses. Use index parameter when multiple elements share the same name.')
+def type_element_tool(input_text:str,element_text:str,index:int=0,sensitive:bool=False):
     element, error = _find_element(element_text, index)
     if error:
         return error
@@ -122,13 +263,38 @@ def type_element_tool(input_text:str,element_text:str,index:int=0):
     adb_shell(f"input tap {x} {y}")
     escaped_text = input_text.replace(' ', '%s').replace("'", "\\'")
     adb_shell(f"input text '{escaped_text}'")
-    recorder.record_action('type_element', {'input_text': input_text, 'element_text': element_text, 'index': index, 'x': x, 'y': y}, result=f'Typed "{input_text}" on element "{element.name}" at ({x},{y})')
-    return f'Typed "{input_text}" on element "{element.name}" at ({x},{y})'
+    display_text = '****' if sensitive else input_text
+    global _sensitive_counter
+    if sensitive:
+        _sensitive_counter += 1
+    var_name = element_text.upper().replace(' ', '_') + '_INPUT_' + str(_sensitive_counter) if sensitive else None
+    scrubbed_name = _scrub_pii(element.name)
+    recorder.record_action('type_element', {'input_text': display_text, 'element_text': element_text, 'index': index, 'x': x, 'y': y, 'sensitive': sensitive, 'var_name': var_name}, result=f'Typed "{display_text}" on element "{scrubbed_name}" at ({x},{y})')
+    return f'Typed "{display_text}" on element "{scrubbed_name}" at ({x},{y})'
 
 @mcp.tool('State-Tool',description='Get the state of the device. Optionally includes visual screenshot when use_vision=True.')
 def state_tool(use_vision:bool=False):
     mobile_state=mobile.get_state(use_vision=use_vision)
-    return [mobile_state.tree_state.to_string()]+([Image(data=mobile_state.screenshot,format='PNG')] if use_vision else [])
+    # Get phone state metadata for agent context
+    phone_info = ''
+    try:
+        if mobile.use_mcp_helper and not mobile._mcp_initialized:
+            mobile._init_mcp_helper()
+        if mobile.use_mcp_helper and mobile.mcp_adapter:
+            ps = mobile.mcp_adapter.get_phone_state()
+            phone_info = 'App: ' + ps.get('packageName', 'unknown') + ' | Activity: ' + ps.get('activityName', 'unknown') + ' | Keyboard: ' + str(ps.get('keyboardVisible', False)) + '\n'
+    except Exception:
+        pass
+    # Scrub element names with collision resolution for unique identification
+    elements = mobile_state.tree_state.interactive_elements
+    all_names = [e.name for e in elements]
+    scrub_map = _scrub_pii_unique(all_names)
+    tree_lines = []
+    for index, node in enumerate(elements):
+        scrubbed_name = scrub_map.get(node.name, node.name)
+        tree_lines.append(f'Label: {index} Name: {scrubbed_name} Coordinates: {node.coordinates.to_string()}')
+    tree_output = '\n'.join(tree_lines)
+    return [phone_info + tree_output]+([Image(data=mobile_state.screenshot,format='PNG')] if use_vision else [])
 
 @mcp.tool(name='Launch-App-Tool',description='Launch an app by its package name. Opens the app as if the user tapped its icon on the home screen.')
 def launch_app_tool(package:str):
@@ -199,16 +365,21 @@ def swipe_tool(x1:int,y1:int,x2:int,y2:int):
     recorder.record_action('swipe', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2}, result=f'Swiped from ({x1},{y1}) to ({x2},{y2})')
     return f'Swiped from ({x1},{y1}) to ({x2},{y2})'
 
-@mcp.tool(name='Type-Tool',description='Type on a specific cordinate')
-def type_tool(text:str,x:int,y:int,clear:bool=False):
+@mcp.tool(name='Type-Tool',description='Type on a specific cordinate. Set sensitive=True for passwords or private data to prevent the typed text from appearing in responses.')
+def type_tool(text:str,x:int,y:int,clear:bool=False,sensitive:bool=False):
     # First click on the coordinates to focus the input field
     adb_shell(f"input tap {x} {y}")
     # Use ADB input text for typing (simpler and doesn't require IME setup)
     # Note: Special characters may need escaping
     escaped_text = text.replace(' ', '%s').replace("'", "\\'")
     adb_shell(f"input text '{escaped_text}'")
-    recorder.record_action('type', {'text': text, 'x': x, 'y': y, 'clear': clear}, result=f'Typed "{text}" on ({x},{y})')
-    return f'Typed "{text}" on ({x},{y})'
+    display_text = '****' if sensitive else text
+    global _sensitive_counter
+    if sensitive:
+        _sensitive_counter += 1
+    var_name = 'SENSITIVE_INPUT_' + str(_sensitive_counter) if sensitive else None
+    recorder.record_action('type', {'text': display_text, 'x': x, 'y': y, 'clear': clear, 'sensitive': sensitive, 'var_name': var_name}, result=f'Typed "{display_text}" on ({x},{y})')
+    return f'Typed "{display_text}" on ({x},{y})'
 
 @mcp.tool(name='Drag-Tool',description='Drag from location and drop on another location')
 def drag_tool(x1:int,y1:int,x2:int,y2:int):

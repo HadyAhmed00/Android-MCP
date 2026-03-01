@@ -117,6 +117,7 @@ class TestRecorder:
             'import uiautomator2 as u2',
             'import subprocess',
             'import time',
+            'import os',
             '',
             'def run_test(device=None):',
             '    """Run the recorded test sequence."""',
@@ -131,7 +132,8 @@ class TestRecorder:
                 prev_action = self.actions[i-2]
                 time_diff = action.timestamp - prev_action.timestamp
                 if time_diff > 0.5:  # Add delay if there was a significant gap
-                    wait_before = f"    time.sleep({time_diff:.1f})\n"
+                    capped = min(time_diff, 2.0)  # cap at 2s; recording overhead is not needed on replay
+                    wait_before = f"    time.sleep({capped:.1f})\n"
 
             script_lines.append(wait_before)
             script_lines.append(self._generate_action_code_uiautomator(action, i))
@@ -164,6 +166,7 @@ class TestRecorder:
             'import subprocess',
             'import time',
             'import sys',
+            'import os',
             '',
             '',
             'class DeviceController:',
@@ -224,6 +227,54 @@ class TestRecorder:
             '        cmd = f"adb -s {self.device_id} shell cmd statusbar expand-notifications"',
             '        subprocess.run(cmd, shell=True)',
             '    ',
+            '    def click_element_by_text(self, text, x_fallback, y_fallback):',
+            '        """Smart click: text first (handles screen resize), coords fallback (handles text changes)."""',
+            '        import re',
+            '        try:',
+            '            subprocess.run(f"adb -s {self.device_id} shell uiautomator dump /sdcard/_d.xml",',
+            '                           shell=True, capture_output=True, timeout=8)',
+            '            r = subprocess.run(f"adb -s {self.device_id} shell cat /sdcard/_d.xml",',
+            '                               shell=True, capture_output=True, text=True, timeout=5)',
+            '            for node in re.findall(r"<node[^>]+>", r.stdout):',
+            '                t_m = re.search(r\'text="([^"]*)"\', node)',
+            '                cd_m = re.search(r\'content-desc="([^"]*)"\', node)',
+            '                found = ((t_m and text.lower() in t_m.group(1).lower()) or',
+            '                         (cd_m and text.lower() in cd_m.group(1).lower()))',
+            '                if found and \'bounds="\' in node:',
+            '                    coords = re.findall(r\'\\d+\', node.split(\'bounds="\')[1].split(\'"\')[0])',
+            '                    if len(coords) >= 4:',
+            '                        x = (int(coords[0]) + int(coords[2])) // 2',
+            '                        y = (int(coords[1]) + int(coords[3])) // 2',
+            '                        self.click(x, y)',
+            '                        return',
+            '        except Exception:',
+            '            pass',
+            '        self.click(x_fallback, y_fallback)  # coords fallback',
+            '    ',
+            '    def long_click_element_by_text(self, text, x_fallback, y_fallback):',
+            '        """Smart long click: text first (handles screen resize), coords fallback (handles text changes)."""',
+            '        import re',
+            '        try:',
+            '            subprocess.run(f"adb -s {self.device_id} shell uiautomator dump /sdcard/_d.xml",',
+            '                           shell=True, capture_output=True, timeout=8)',
+            '            r = subprocess.run(f"adb -s {self.device_id} shell cat /sdcard/_d.xml",',
+            '                               shell=True, capture_output=True, text=True, timeout=5)',
+            '            for node in re.findall(r"<node[^>]+>", r.stdout):',
+            '                t_m = re.search(r\'text="([^"]*)"\', node)',
+            '                cd_m = re.search(r\'content-desc="([^"]*)"\', node)',
+            '                found = ((t_m and text.lower() in t_m.group(1).lower()) or',
+            '                         (cd_m and text.lower() in cd_m.group(1).lower()))',
+            '                if found and \'bounds="\' in node:',
+            '                    coords = re.findall(r\'\\d+\', node.split(\'bounds="\')[1].split(\'"\')[0])',
+            '                    if len(coords) >= 4:',
+            '                        x = (int(coords[0]) + int(coords[2])) // 2',
+            '                        y = (int(coords[1]) + int(coords[3])) // 2',
+            '                        self.long_click(x, y)',
+            '                        return',
+            '        except Exception:',
+            '            pass',
+            '        self.long_click(x_fallback, y_fallback)  # coords fallback',
+            '    ',
             '',
             'def run_test(device_id="emulator-5554"):',
             '    """Run the recorded test sequence."""',
@@ -239,7 +290,8 @@ class TestRecorder:
                 prev_action = self.actions[i-2]
                 time_diff = action.timestamp - prev_action.timestamp
                 if time_diff > 0.5:  # Add delay if there was a significant gap
-                    wait_before = f"    time.sleep({time_diff:.1f})\n"
+                    capped = min(time_diff, 2.0)  # cap at 2s; recording overhead is not needed on replay
+                    wait_before = f"    time.sleep({capped:.1f})\n"
 
             script_lines.append(wait_before)
             script_lines.append(self._generate_action_code_adb(action, i))
@@ -282,6 +334,9 @@ class TestRecorder:
             return f'{indent}# Action {action_num}: Swipe from ({params["x1"]}, {params["y1"]}) to ({params["x2"]}, {params["y2"]})\n{indent}device.swipe({params["x1"]}, {params["y1"]}, {params["x2"]}, {params["y2"]})'
 
         elif action.action == "type":
+            if params.get('sensitive'):
+                var_name = params.get('var_name', 'SENSITIVE_INPUT')
+                return f'{indent}# Action {action_num}: Type sensitive input (from env var)\n{indent}device.send_keys(os.environ["{var_name}"])'
             text = params["text"].replace('"', '\\"')
             return f'{indent}# Action {action_num}: Type "{text}"\n{indent}device.send_keys("{text}")'
 
@@ -296,12 +351,37 @@ class TestRecorder:
             return f'{indent}# Action {action_num}: Open notification bar\n{indent}device.open_notification()'
 
         elif action.action == "click_element":
-            return f'{indent}# Action {action_num}: Click on element "{params["text"]}" at ({params["x"]}, {params["y"]})\n{indent}device.click({params["x"]}, {params["y"]})'
+            text = params["text"].replace('"', '\\"')
+            x, y = params["x"], params["y"]
+            return '\n'.join([
+                f'{indent}# Action {action_num}: Click element "{text}"  [coords: ({x}, {y})]',
+                f'{indent}_el = device(text="{text}")',
+                f'{indent}if not _el.exists(timeout=3):',
+                f'{indent}    _el = device(textContains="{text}")',
+                f'{indent}if _el.exists(timeout=2):',
+                f'{indent}    _el.click()',
+                f'{indent}else:',
+                f'{indent}    device.click({x}, {y})  # coords fallback',
+            ])
 
         elif action.action == "long_click_element":
-            return f'{indent}# Action {action_num}: Long click on element "{params["text"]}" at ({params["x"]}, {params["y"]})\n{indent}device.long_click({params["x"]}, {params["y"]})'
+            text = params["text"].replace('"', '\\"')
+            x, y = params["x"], params["y"]
+            return '\n'.join([
+                f'{indent}# Action {action_num}: Long click element "{text}"  [coords: ({x}, {y})]',
+                f'{indent}_el = device(text="{text}")',
+                f'{indent}if not _el.exists(timeout=3):',
+                f'{indent}    _el = device(textContains="{text}")',
+                f'{indent}if _el.exists(timeout=2):',
+                f'{indent}    _el.long_click()',
+                f'{indent}else:',
+                f'{indent}    device.long_click({x}, {y})  # coords fallback',
+            ])
 
         elif action.action == "type_element":
+            if params.get('sensitive'):
+                var_name = params.get('var_name', 'SENSITIVE_INPUT')
+                return f'{indent}# Action {action_num}: Type sensitive input on element "{params["element_text"]}" (from env var)\n{indent}device.click({params["x"]}, {params["y"]})\n{indent}device.send_keys(os.environ["{var_name}"])'
             text = params["input_text"].replace('"', '\\"')
             return f'{indent}# Action {action_num}: Type "{text}" on element "{params["element_text"]}" at ({params["x"]}, {params["y"]})\n{indent}device.click({params["x"]}, {params["y"]})\n{indent}device.send_keys("{text}")'
 
@@ -351,6 +431,9 @@ class TestRecorder:
             return f'{indent}# Action {action_num}: Swipe from ({params["x1"]}, {params["y1"]}) to ({params["x2"]}, {params["y2"]})\n{indent}device.swipe({params["x1"]}, {params["y1"]}, {params["x2"]}, {params["y2"]})'
 
         elif action.action == "type":
+            if params.get('sensitive'):
+                var_name = params.get('var_name', 'SENSITIVE_INPUT')
+                return f'{indent}# Action {action_num}: Type sensitive input (from env var)\n{indent}device.type_text(os.environ["{var_name}"])'
             text = params["text"].replace('"', '\\"')
             return f'{indent}# Action {action_num}: Type "{text}"\n{indent}device.type_text("{text}")'
 
@@ -365,12 +448,21 @@ class TestRecorder:
             return f'{indent}# Action {action_num}: Open notification bar\n{indent}device.open_notification()'
 
         elif action.action == "click_element":
-            return f'{indent}# Action {action_num}: Click on element "{params["text"]}" at ({params["x"]}, {params["y"]})\n{indent}device.click({params["x"]}, {params["y"]})'
+            text = params["text"].replace('"', '\\"')
+            x, y = params["x"], params["y"]
+            return (f'{indent}# Action {action_num}: Click element "{text}"  [coords: ({x}, {y})]\n'
+                    f'{indent}device.click_element_by_text("{text}", {x}, {y})')
 
         elif action.action == "long_click_element":
-            return f'{indent}# Action {action_num}: Long click on element "{params["text"]}" at ({params["x"]}, {params["y"]})\n{indent}device.long_click({params["x"]}, {params["y"]})'
+            text = params["text"].replace('"', '\\"')
+            x, y = params["x"], params["y"]
+            return (f'{indent}# Action {action_num}: Long click element "{text}"  [coords: ({x}, {y})]\n'
+                    f'{indent}device.long_click_element_by_text("{text}", {x}, {y})')
 
         elif action.action == "type_element":
+            if params.get('sensitive'):
+                var_name = params.get('var_name', 'SENSITIVE_INPUT')
+                return f'{indent}# Action {action_num}: Type sensitive input on element "{params["element_text"]}" (from env var)\n{indent}device.click({params["x"]}, {params["y"]})\n{indent}device.type_text(os.environ["{var_name}"])'
             text = params["input_text"].replace('"', '\\"')
             return f'{indent}# Action {action_num}: Type "{text}" on element "{params["element_text"]}" at ({params["x"]}, {params["y"]})\n{indent}device.click({params["x"]}, {params["y"]})\n{indent}device.type_text("{text}")'
 
@@ -447,6 +539,8 @@ class TestRecorder:
         elif action.action == "swipe":
             return f"Swipe from ({params['x1']}, {params['y1']}) to ({params['x2']}, {params['y2']})"
         elif action.action == "type":
+            if params.get('sensitive'):
+                return f"Type sensitive input (env var: {params.get('var_name', 'SENSITIVE_INPUT')})"
             return f"Type text: \"{params['text']}\""
         elif action.action == "drag":
             return f"Drag from ({params['x1']}, {params['y1']}) to ({params['x2']}, {params['y2']})"
@@ -457,6 +551,8 @@ class TestRecorder:
         elif action.action == "long_click_element":
             return f"Long click on element \"{params['text']}\" at ({params['x']}, {params['y']})"
         elif action.action == "type_element":
+            if params.get('sensitive'):
+                return f"Type sensitive input (env var: {params.get('var_name', 'SENSITIVE_INPUT')}) on element \"{params['element_text']}\" at ({params['x']}, {params['y']})"
             return f"Type \"{params['input_text']}\" on element \"{params['element_text']}\" at ({params['x']}, {params['y']})"
         elif action.action == "launch_app":
             return f"Launch app {params['package']}"
