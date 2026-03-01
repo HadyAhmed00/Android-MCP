@@ -115,6 +115,7 @@ class TestRecorder:
             '"""',
             '',
             'import uiautomator2 as u2',
+            'import subprocess',
             'import time',
             '',
             'def run_test(device=None):',
@@ -294,6 +295,40 @@ class TestRecorder:
         elif action.action == "notification":
             return f'{indent}# Action {action_num}: Open notification bar\n{indent}device.open_notification()'
 
+        elif action.action == "click_element":
+            return f'{indent}# Action {action_num}: Click on element "{params["text"]}" at ({params["x"]}, {params["y"]})\n{indent}device.click({params["x"]}, {params["y"]})'
+
+        elif action.action == "long_click_element":
+            return f'{indent}# Action {action_num}: Long click on element "{params["text"]}" at ({params["x"]}, {params["y"]})\n{indent}device.long_click({params["x"]}, {params["y"]})'
+
+        elif action.action == "type_element":
+            text = params["input_text"].replace('"', '\\"')
+            return f'{indent}# Action {action_num}: Type "{text}" on element "{params["element_text"]}" at ({params["x"]}, {params["y"]})\n{indent}device.click({params["x"]}, {params["y"]})\n{indent}device.send_keys("{text}")'
+
+        elif action.action == "launch_app":
+            pkg = params["package"]
+            return f'{indent}# Action {action_num}: Launch app {pkg}\n{indent}subprocess.run(["adb", "shell", "monkey", "-p", "{pkg}", "-c", "android.intent.category.LAUNCHER", "1"], capture_output=True)'
+
+        elif action.action == "kill_app":
+            pkg = params["package"]
+            return f'{indent}# Action {action_num}: Force stop app {pkg}\n{indent}subprocess.run(["adb", "shell", "am", "force-stop", "{pkg}"], capture_output=True)'
+
+        elif action.action == "clear_app_data":
+            pkg = params["package"]
+            return f'{indent}# Action {action_num}: Clear data for app {pkg}\n{indent}subprocess.run(["adb", "shell", "pm", "clear", "{pkg}"], capture_output=True)'
+
+        elif action.action == "wait_for_condition":
+            elapsed = params.get("elapsed", params.get("timeout", 5))
+            conditions = []
+            if params.get("element_text"):
+                conditions.append('element "' + params["element_text"] + '" to appear')
+            if params.get("element_gone"):
+                conditions.append('element "' + params["element_gone"] + '" to disappear')
+            if params.get("activity_name"):
+                conditions.append('activity "' + params["activity_name"] + '" to load')
+            desc = ', '.join(conditions) if conditions else 'condition'
+            return f'{indent}# Action {action_num}: Wait for {desc} (took {elapsed}s during recording)\n{indent}time.sleep({elapsed})'
+
         elif action.action == "wait":
             duration = params["duration"]
             return f'{indent}# Action {action_num}: Wait {duration} seconds\n{indent}time.sleep({duration})'
@@ -328,6 +363,40 @@ class TestRecorder:
 
         elif action.action == "notification":
             return f'{indent}# Action {action_num}: Open notification bar\n{indent}device.open_notification()'
+
+        elif action.action == "click_element":
+            return f'{indent}# Action {action_num}: Click on element "{params["text"]}" at ({params["x"]}, {params["y"]})\n{indent}device.click({params["x"]}, {params["y"]})'
+
+        elif action.action == "long_click_element":
+            return f'{indent}# Action {action_num}: Long click on element "{params["text"]}" at ({params["x"]}, {params["y"]})\n{indent}device.long_click({params["x"]}, {params["y"]})'
+
+        elif action.action == "type_element":
+            text = params["input_text"].replace('"', '\\"')
+            return f'{indent}# Action {action_num}: Type "{text}" on element "{params["element_text"]}" at ({params["x"]}, {params["y"]})\n{indent}device.click({params["x"]}, {params["y"]})\n{indent}device.type_text("{text}")'
+
+        elif action.action == "launch_app":
+            pkg = params["package"]
+            return f'{indent}# Action {action_num}: Launch app {pkg}\n{indent}subprocess.run(f"adb -s {{device.device_id}} shell monkey -p {pkg} -c android.intent.category.LAUNCHER 1", shell=True, capture_output=True)'
+
+        elif action.action == "kill_app":
+            pkg = params["package"]
+            return f'{indent}# Action {action_num}: Force stop app {pkg}\n{indent}subprocess.run(f"adb -s {{device.device_id}} shell am force-stop {pkg}", shell=True, capture_output=True)'
+
+        elif action.action == "clear_app_data":
+            pkg = params["package"]
+            return f'{indent}# Action {action_num}: Clear data for app {pkg}\n{indent}subprocess.run(f"adb -s {{device.device_id}} shell pm clear {pkg}", shell=True, capture_output=True)'
+
+        elif action.action == "wait_for_condition":
+            elapsed = params.get("elapsed", params.get("timeout", 5))
+            conditions = []
+            if params.get("element_text"):
+                conditions.append('element "' + params["element_text"] + '" to appear')
+            if params.get("element_gone"):
+                conditions.append('element "' + params["element_gone"] + '" to disappear')
+            if params.get("activity_name"):
+                conditions.append('activity "' + params["activity_name"] + '" to load')
+            desc = ', '.join(conditions) if conditions else 'condition'
+            return f'{indent}# Action {action_num}: Wait for {desc} (took {elapsed}s during recording)\n{indent}time.sleep({elapsed})'
 
         elif action.action == "wait":
             duration = params["duration"]
@@ -383,6 +452,30 @@ class TestRecorder:
             return f"Drag from ({params['x1']}, {params['y1']}) to ({params['x2']}, {params['y2']})"
         elif action.action == "press":
             return f"Press {params['button']} button"
+        elif action.action == "click_element":
+            return f"Click on element \"{params['text']}\" at ({params['x']}, {params['y']})"
+        elif action.action == "long_click_element":
+            return f"Long click on element \"{params['text']}\" at ({params['x']}, {params['y']})"
+        elif action.action == "type_element":
+            return f"Type \"{params['input_text']}\" on element \"{params['element_text']}\" at ({params['x']}, {params['y']})"
+        elif action.action == "launch_app":
+            return f"Launch app {params['package']}"
+        elif action.action == "kill_app":
+            return f"Force stop app {params['package']}"
+        elif action.action == "clear_app_data":
+            return f"Clear all data for app {params['package']}"
+        elif action.action == "wait_for_condition":
+            conditions = []
+            if params.get("element_text"):
+                conditions.append('element "' + params["element_text"] + '" to appear')
+            if params.get("element_gone"):
+                conditions.append('element "' + params["element_gone"] + '" to disappear')
+            if params.get("activity_name"):
+                conditions.append('activity "' + params["activity_name"] + '" to load')
+            desc = ', '.join(conditions) if conditions else 'condition'
+            result = params.get("result", "unknown")
+            elapsed = params.get("elapsed", "?")
+            return f"Wait for {desc} (result: {result}, took {elapsed}s)"
         elif action.action == "notification":
             return "Open notification bar"
         elif action.action == "wait":

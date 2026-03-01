@@ -57,6 +57,32 @@ def adb_shell(command: str) -> str:
         raise RuntimeError(f"ADB command failed: {result.stderr}")
     return result.stdout.strip()
 
+def _find_element(text, index=0):
+    """Find an interactive element by name/text on the current screen.
+    Returns a tuple of (element, error_message).
+    If element is found, error_message is None.
+    If element is not found, element is None and error_message describes the problem.
+    """
+    mobile_state = mobile.get_state()
+    elements = mobile_state.tree_state.interactive_elements
+
+    matches = []
+    for element in elements:
+        if text.lower() in element.name.lower():
+            matches.append(element)
+
+    if not matches:
+        available_names = []
+        for element in elements[:20]:
+            available_names.append('"' + element.name + '"')
+        available_str = ', '.join(available_names)
+        return None, 'Element "' + text + '" not found. Available elements: ' + available_str
+
+    if index >= len(matches):
+        return None, 'Index ' + str(index) + ' out of range. Found ' + str(len(matches)) + ' matches for "' + text + '".'
+
+    return matches[index], None
+
 @mcp.tool(name='Click-Tool',description='Click on a specific cordinate')
 def click_tool(x:int,y:int):
     # Use ADB input tap instead of uiautomator2 to avoid accessibility service conflict
@@ -64,10 +90,100 @@ def click_tool(x:int,y:int):
     recorder.record_action('click', {'x': x, 'y': y}, result=f'Clicked on ({x},{y})')
     return f'Clicked on ({x},{y})'
 
+@mcp.tool(name='Click-Element-Tool',description='Click on an element by its name or text instead of coordinates. Finds the element on screen and clicks its center. Use index parameter when multiple elements share the same name.')
+def click_element_tool(text:str,index:int=0):
+    element, error = _find_element(text, index)
+    if error:
+        return error
+    x = element.coordinates.x
+    y = element.coordinates.y
+    adb_shell(f"input tap {x} {y}")
+    recorder.record_action('click_element', {'text': text, 'index': index, 'x': x, 'y': y}, result=f'Clicked on element "{element.name}" at ({x},{y})')
+    return f'Clicked on element "{element.name}" at ({x},{y})'
+
+@mcp.tool(name='Long-Click-Element-Tool',description='Long click on an element by its name or text instead of coordinates. Finds the element on screen and long clicks its center. Use index parameter when multiple elements share the same name.')
+def long_click_element_tool(text:str,index:int=0):
+    element, error = _find_element(text, index)
+    if error:
+        return error
+    x = element.coordinates.x
+    y = element.coordinates.y
+    adb_shell(f"input swipe {x} {y} {x} {y} 1000")
+    recorder.record_action('long_click_element', {'text': text, 'index': index, 'x': x, 'y': y}, result=f'Long Clicked on element "{element.name}" at ({x},{y})')
+    return f'Long Clicked on element "{element.name}" at ({x},{y})'
+
+@mcp.tool(name='Type-Element-Tool',description='Find an input field by its name or text, tap it to focus, and type text into it. Use index parameter when multiple elements share the same name.')
+def type_element_tool(input_text:str,element_text:str,index:int=0):
+    element, error = _find_element(element_text, index)
+    if error:
+        return error
+    x = element.coordinates.x
+    y = element.coordinates.y
+    adb_shell(f"input tap {x} {y}")
+    escaped_text = input_text.replace(' ', '%s').replace("'", "\\'")
+    adb_shell(f"input text '{escaped_text}'")
+    recorder.record_action('type_element', {'input_text': input_text, 'element_text': element_text, 'index': index, 'x': x, 'y': y}, result=f'Typed "{input_text}" on element "{element.name}" at ({x},{y})')
+    return f'Typed "{input_text}" on element "{element.name}" at ({x},{y})'
+
 @mcp.tool('State-Tool',description='Get the state of the device. Optionally includes visual screenshot when use_vision=True.')
 def state_tool(use_vision:bool=False):
     mobile_state=mobile.get_state(use_vision=use_vision)
     return [mobile_state.tree_state.to_string()]+([Image(data=mobile_state.screenshot,format='PNG')] if use_vision else [])
+
+@mcp.tool(name='Launch-App-Tool',description='Launch an app by its package name. Opens the app as if the user tapped its icon on the home screen.')
+def launch_app_tool(package:str):
+    adb_shell(f"monkey -p {package} -c android.intent.category.LAUNCHER 1")
+    recorder.record_action('launch_app', {'package': package}, result=f'Launched app {package}')
+    return f'Launched app {package}'
+
+@mcp.tool(name='Kill-App-Tool',description='Force stop an app by its package name. Useful for resetting app state or closing a frozen app.')
+def kill_app_tool(package:str):
+    adb_shell(f"am force-stop {package}")
+    recorder.record_action('kill_app', {'package': package}, result=f'Force stopped app {package}')
+    return f'Force stopped app {package}'
+
+@mcp.tool(name='Clear-App-Data-Tool',description='Clear all data for an app by its package name. Resets the app to a fresh install state including login, cache, and preferences.')
+def clear_app_data_tool(package:str):
+    adb_shell(f"pm clear {package}")
+    recorder.record_action('clear_app_data', {'package': package}, result=f'Cleared data for app {package}')
+    return f'Cleared data for app {package}'
+
+@mcp.tool(name='Get-Current-App-Tool',description='Get the currently active app package name and activity. Useful for verifying navigation or detecting unexpected screens.')
+def get_current_app_tool():
+    if mobile.use_mcp_helper and not mobile._mcp_initialized:
+        mobile._init_mcp_helper()
+    if mobile.use_mcp_helper and mobile.mcp_adapter:
+        try:
+            phone_state = mobile.mcp_adapter.get_phone_state()
+            package = phone_state.get('packageName', 'unknown')
+            activity = phone_state.get('activityName', 'unknown')
+            keyboard = phone_state.get('keyboardVisible', False)
+            result = f'Current app: {package}\nCurrent activity: {activity}\nKeyboard visible: {keyboard}'
+            return result
+        except Exception:
+            pass
+    # Fallback to ADB
+    output = adb_shell("dumpsys activity activities | grep mResumedActivity")
+    return f'Current activity: {output}'
+
+@mcp.tool(name='List-Apps-Tool',description='List all installed launchable apps on the device with their package names.')
+def list_apps_tool():
+    if mobile.use_mcp_helper and not mobile._mcp_initialized:
+        mobile._init_mcp_helper()
+    if mobile.use_mcp_helper and mobile.mcp_adapter:
+        try:
+            apps = mobile.mcp_adapter.get_installed_apps()
+            lines = []
+            for app in apps:
+                label = app.get('label', 'Unknown')
+                pkg = app.get('packageName', '')
+                lines.append(f'{label}: {pkg}')
+            return '\n'.join(lines)
+        except Exception:
+            pass
+    # Fallback to ADB
+    output = adb_shell("pm list packages -3")
+    return output
 
 @mcp.tool(name='Long-Click-Tool',description='Long click on a specific cordinate')
 def long_click_tool(x:int,y:int):
@@ -132,6 +248,98 @@ def wait_tool(duration:int):
     time.sleep(duration)
     recorder.record_action('wait', {'duration': duration}, result=f'Waited for {duration} seconds')
     return f'Waited for {duration} seconds'
+
+@mcp.tool(name='Wait-For-Condition-Tool',description='Wait until a specific condition is met on screen. Can wait for an element to appear, disappear, or a specific activity to load. Polls the device state every interval until the condition is met or timeout is reached.')
+def wait_for_condition_tool(element_text:str=None,element_gone:str=None,activity_name:str=None,timeout:int=10,interval:float=1.0):
+    """
+    Wait until a condition is met on the device screen.
+
+    Parameters:
+    - element_text: Wait until an element with this text appears on screen
+    - element_gone: Wait until an element with this text disappears from screen
+    - activity_name: Wait until the device is on this activity
+    - timeout: Maximum seconds to wait before giving up (default 10)
+    - interval: Seconds between each check (default 1.0)
+    """
+    if not element_text and not element_gone and not activity_name:
+        return 'Error: At least one condition must be specified (element_text, element_gone, or activity_name).'
+
+    start_time = time.time()
+
+    while True:
+        elapsed = time.time() - start_time
+        if elapsed >= timeout:
+            conditions = []
+            if element_text:
+                conditions.append('element "' + element_text + '" to appear')
+            if element_gone:
+                conditions.append('element "' + element_gone + '" to disappear')
+            if activity_name:
+                conditions.append('activity "' + activity_name + '" to load')
+            condition_str = ', '.join(conditions)
+            recorder.record_action('wait_for_condition', {'element_text': element_text, 'element_gone': element_gone, 'activity_name': activity_name, 'timeout': timeout, 'result': 'timeout'}, result='Timed out waiting for ' + condition_str)
+            return 'Timed out after ' + str(timeout) + ' seconds waiting for ' + condition_str + '.'
+
+        mobile_state = mobile.get_state()
+        elements = mobile_state.tree_state.interactive_elements
+        element_names = [e.name.lower() for e in elements]
+
+        # Check element_text condition: element should appear
+        if element_text:
+            found = False
+            for name in element_names:
+                if element_text.lower() in name:
+                    found = True
+                    break
+            if not found:
+                time.sleep(interval)
+                continue
+
+        # Check element_gone condition: element should disappear
+        if element_gone:
+            still_there = False
+            for name in element_names:
+                if element_gone.lower() in name:
+                    still_there = True
+                    break
+            if still_there:
+                time.sleep(interval)
+                continue
+
+        # Check activity_name condition via MCP Helper or ADB fallback
+        if activity_name:
+            activity_matched = False
+            if mobile.use_mcp_helper and mobile.mcp_adapter:
+                try:
+                    phone_state = mobile.mcp_adapter.get_phone_state()
+                    current_activity = phone_state.get('activityName', '')
+                    if activity_name.lower() in current_activity.lower():
+                        activity_matched = True
+                except Exception:
+                    pass
+            if not activity_matched:
+                try:
+                    output = adb_shell("dumpsys activity activities | grep mResumedActivity")
+                    if activity_name.lower() in output.lower():
+                        activity_matched = True
+                except Exception:
+                    pass
+            if not activity_matched:
+                time.sleep(interval)
+                continue
+
+        # All conditions met
+        elapsed = round(time.time() - start_time, 1)
+        conditions_met = []
+        if element_text:
+            conditions_met.append('element "' + element_text + '" appeared')
+        if element_gone:
+            conditions_met.append('element "' + element_gone + '" disappeared')
+        if activity_name:
+            conditions_met.append('activity "' + activity_name + '" loaded')
+        result_str = ', '.join(conditions_met)
+        recorder.record_action('wait_for_condition', {'element_text': element_text, 'element_gone': element_gone, 'activity_name': activity_name, 'timeout': timeout, 'elapsed': elapsed, 'result': 'success'}, result='Condition met: ' + result_str + ' after ' + str(elapsed) + 's')
+        return 'Condition met after ' + str(elapsed) + ' seconds: ' + result_str + '.'
 
 @mcp.tool(name='Start-Recording-Tool',description='Start recording test actions')
 def start_recording_tool():
