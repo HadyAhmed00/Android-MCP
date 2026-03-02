@@ -395,9 +395,9 @@ rec_ce.stop()
 adb_ce = rec_ce.export_as_python(filename='tmp_ce_adb.py', use_adb=True)
 with open(adb_ce) as f: ce_adb = f.read()
 
-test('ADB: click_element Submit', 'Submit' in ce_adb and 'device.click(200, 300)' in ce_adb)
-test('ADB: click_element index 1 uses coords', 'device.click(400, 300)' in ce_adb)
-test('ADB: long_click_element Delete', 'Delete' in ce_adb and 'device.long_click(100, 500)' in ce_adb)
+test('ADB: click_element Submit', 'Submit' in ce_adb and 'click_element_by_text("Submit", 200, 300)' in ce_adb)
+test('ADB: click_element index 1 uses coords', 'click_element_by_text("OK", 400, 300)' in ce_adb)
+test('ADB: long_click_element Delete', 'Delete' in ce_adb and 'long_click_element_by_text("Delete", 100, 500)' in ce_adb)
 
 ui_ce = rec_ce.export_as_python(filename='tmp_ce_ui.py', use_adb=False)
 with open(ui_ce) as f: ce_ui = f.read()

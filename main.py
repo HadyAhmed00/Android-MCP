@@ -222,11 +222,52 @@ def _scrub_pii_unique(names):
 
     return result
 
+def _find_element_at(x, y):
+    """Try to find a text label for the element at (x, y) via UIAutomator dump.
+    Checks hint (placeholder), content-desc, and text attributes.
+    Returns the label string if found, None otherwise.
+    Picks the smallest bounding box that contains the point (most specific node)."""
+    try:
+        subprocess.run(f"adb -s {device_id} shell uiautomator dump /sdcard/_at.xml",
+                       shell=True, capture_output=True, timeout=8)
+        r = subprocess.run(f"adb -s {device_id} shell cat /sdcard/_at.xml",
+                           shell=True, capture_output=True, text=True, timeout=5)
+        best_label = None
+        best_area = None
+        for node in re.findall(r'<node[^>]+>', r.stdout):
+            if 'bounds="' not in node:
+                continue
+            coords = re.findall(r'\d+', node.split('bounds="')[1].split('"')[0])
+            if len(coords) < 4:
+                continue
+            x1, y1, x2, y2 = int(coords[0]), int(coords[1]), int(coords[2]), int(coords[3])
+            if not (x1 <= x <= x2 and y1 <= y <= y2):
+                continue
+            area = (x2 - x1) * (y2 - y1)
+            # Prefer hint (placeholder) > content-desc > text
+            label = None
+            for attr in ('hint', 'content-desc', 'text'):
+                m = re.search(rf'{attr}="([^"]+)"', node)
+                if m and m.group(1).strip():
+                    label = m.group(1).strip()
+                    break
+            if label and (best_area is None or area < best_area):
+                best_label = label
+                best_area = area
+        return best_label
+    except Exception:
+        return None
+
 @mcp.tool(name='Click-Tool',description='Click on a specific cordinate')
 def click_tool(x:int,y:int):
     # Use ADB input tap instead of uiautomator2 to avoid accessibility service conflict
     adb_shell(f"input tap {x} {y}")
-    recorder.record_action('click', {'x': x, 'y': y}, result=f'Clicked on ({x},{y})')
+    label = _find_element_at(x, y)
+    if label:
+        scrubbed = _scrub_pii(label)
+        recorder.record_action('click_element', {'text': label, 'index': 0, 'x': x, 'y': y}, result=f'Clicked element "{scrubbed}" at ({x},{y})')
+    else:
+        recorder.record_action('click', {'x': x, 'y': y}, result=f'Clicked on ({x},{y})')
     return f'Clicked on ({x},{y})'
 
 @mcp.tool(name='Click-Element-Tool',description='Click on an element by its name or text instead of coordinates. Finds the element on screen and clicks its center. Use index parameter when multiple elements share the same name.')
@@ -355,7 +396,12 @@ def list_apps_tool():
 def long_click_tool(x:int,y:int):
     # Use ADB input swipe with long duration to simulate long click
     adb_shell(f"input swipe {x} {y} {x} {y} 1000")
-    recorder.record_action('long_click', {'x': x, 'y': y}, result=f'Long Clicked on ({x},{y})')
+    label = _find_element_at(x, y)
+    if label:
+        scrubbed = _scrub_pii(label)
+        recorder.record_action('long_click_element', {'text': label, 'index': 0, 'x': x, 'y': y}, result=f'Long Clicked element "{scrubbed}" at ({x},{y})')
+    else:
+        recorder.record_action('long_click', {'x': x, 'y': y}, result=f'Long Clicked on ({x},{y})')
     return f'Long Clicked on ({x},{y})'
 
 @mcp.tool(name='Swipe-Tool',description='Swipe on a specific cordinate')
