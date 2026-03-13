@@ -29,9 +29,20 @@ parser.add_argument('--device',type=str,default=None,help='Specific device ID (e
 args = parser.parse_args()
 
 instructions=dedent('''
-Android MCP server provides tools to interact directly with the Android device,
-thus enabling to operate the mobile device like an actual USER.
-It also includes test recording capabilities to capture and export test scripts.''')
+WORKFLOW:
+1. Always call State-Tool first to see the current screen.
+2. Use Click-By-Label with the label index to tap elements.
+3. After any action, call State-Tool again to verify the screen changed.
+4. Never guess or invent coordinates — always get them from State-Tool.
+
+RULES:
+- Coordinates are pixels. Screen size is in the State-Tool header.
+- To scroll down, swipe from a lower y to a higher y (e.g., 1500→500).
+- To scroll up, swipe from a higher y to a lower y.
+- If "Keyboard: visible" in state, bottom elements may be covered.
+- Element types (button, input, checkbox) tell you what interaction is appropriate.
+- Use Type-Tool only on "input" type elements.
+- Use Press-Tool "back" to go back, "home" for home screen, "enter" to submit.''')
 
 mcp=FastMCP(name="Android-MCP",instructions=instructions)
 
@@ -57,33 +68,54 @@ def adb_shell(command: str) -> str:
         raise RuntimeError(f"ADB command failed: {result.stderr}")
     return result.stdout.strip()
 
-@mcp.tool(name='Click-Tool',description='Click on a specific cordinate')
+@mcp.tool(name='Click-Tool',description='Tap at exact (x,y) pixel coordinates. Prefer Click-By-Label when you have a label index from State-Tool.')
 def click_tool(x:int,y:int):
     # Use ADB input tap instead of uiautomator2 to avoid accessibility service conflict
     adb_shell(f"input tap {x} {y}")
     recorder.record_action('click', {'x': x, 'y': y}, result=f'Clicked on ({x},{y})')
     return f'Clicked on ({x},{y})'
 
-@mcp.tool('State-Tool',description='Get the state of the device. Optionally includes visual screenshot when use_vision=True.')
+@mcp.tool('State-Tool',description='Get current screen state: interactive UI elements with label indices, types, names, and tap coordinates. Returns device context (current app, keyboard visibility, screen size). Set use_vision=True for annotated screenshot. Always call this first before interacting.')
 def state_tool(use_vision:bool=False):
     mobile_state=mobile.get_state(use_vision=use_vision)
-    return [mobile_state.tree_state.to_string()]+([Image(data=mobile_state.screenshot,format='PNG')] if use_vision else [])
+    parts = []
+    if mobile_state.device_context:
+        element_count = len(mobile_state.tree_state.interactive_elements)
+        parts.append(mobile_state.device_context.to_string())
+        parts.append(f"--- Interactive Elements ({element_count} elements) ---")
+    parts.append(mobile_state.tree_state.to_string())
+    result = ['\n'.join(parts)]
+    if use_vision and mobile_state.screenshot:
+        result.append(Image(data=mobile_state.screenshot,format='PNG'))
+    return result
 
-@mcp.tool(name='Long-Click-Tool',description='Long click on a specific cordinate')
+@mcp.tool(name='Click-By-Label',description='Tap an element by its label index from the most recent State-Tool output. Safer than Click-Tool because coordinates are resolved internally.')
+def click_by_label(label:int):
+    mobile_state = mobile.get_state()
+    elements = mobile_state.tree_state.interactive_elements
+    if label < 0 or label >= len(elements):
+        return f'Error: Label {label} out of range (0-{len(elements) - 1}). Call State-Tool to refresh.'
+    element = elements[label]
+    x, y = element.coordinates.x, element.coordinates.y
+    adb_shell(f"input tap {x} {y}")
+    recorder.record_action('click_by_label', {'label': label, 'name': element.name, 'x': x, 'y': y}, result=f'Clicked on label {label} ("{element.name}") at ({x},{y})')
+    return f'Clicked on label {label} ("{element.name}") at ({x},{y})'
+
+@mcp.tool(name='Long-Click-Tool',description='Long-press at (x,y) for ~1 second. Use for context menus or elements requiring sustained touch.')
 def long_click_tool(x:int,y:int):
     # Use ADB input swipe with long duration to simulate long click
     adb_shell(f"input swipe {x} {y} {x} {y} 1000")
     recorder.record_action('long_click', {'x': x, 'y': y}, result=f'Long Clicked on ({x},{y})')
     return f'Long Clicked on ({x},{y})'
 
-@mcp.tool(name='Swipe-Tool',description='Swipe on a specific cordinate')
+@mcp.tool(name='Swipe-Tool',description='Swipe from (x1,y1) to (x2,y2) over 300ms. To scroll DOWN, swipe from bottom to top. To scroll UP, swipe from top to bottom.')
 def swipe_tool(x1:int,y1:int,x2:int,y2:int):
     # Use ADB input swipe
     adb_shell(f"input swipe {x1} {y1} {x2} {y2} 300")
     recorder.record_action('swipe', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2}, result=f'Swiped from ({x1},{y1}) to ({x2},{y2})')
     return f'Swiped from ({x1},{y1}) to ({x2},{y2})'
 
-@mcp.tool(name='Type-Tool',description='Type on a specific cordinate')
+@mcp.tool(name='Type-Tool',description='Tap (x,y) to focus the input field, then type the given text. Only use on input/editable elements.')
 def type_tool(text:str,x:int,y:int,clear:bool=False):
     # First click on the coordinates to focus the input field
     adb_shell(f"input tap {x} {y}")
@@ -94,14 +126,14 @@ def type_tool(text:str,x:int,y:int,clear:bool=False):
     recorder.record_action('type', {'text': text, 'x': x, 'y': y, 'clear': clear}, result=f'Typed "{text}" on ({x},{y})')
     return f'Typed "{text}" on ({x},{y})'
 
-@mcp.tool(name='Drag-Tool',description='Drag from location and drop on another location')
+@mcp.tool(name='Drag-Tool',description='Drag from (x1,y1) to (x2,y2) over 500ms. Use for reordering, moving items, or adjusting sliders.')
 def drag_tool(x1:int,y1:int,x2:int,y2:int):
     # Use ADB input swipe with longer duration for drag
     adb_shell(f"input swipe {x1} {y1} {x2} {y2} 500")
     recorder.record_action('drag', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2}, result=f'Dragged from ({x1},{y1}) and dropped on ({x2},{y2})')
     return f'Dragged from ({x1},{y1}) and dropped on ({x2},{y2})'
 
-@mcp.tool(name='Press-Tool',description='Press on specific button on the device')
+@mcp.tool(name='Press-Tool',description='Press a device button: home, back, menu, power, volume_up, volume_down, enter, delete. Also accepts raw Android KEYCODE strings.')
 def press_tool(button:str):
     # Map button names to Android keycodes
     keycode_map = {

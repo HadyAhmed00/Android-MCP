@@ -1,4 +1,4 @@
-from src.mobile.views import MobileState
+from src.mobile.views import MobileState, DeviceContext
 from src.tree import Tree
 import uiautomator2 as u2
 from io import BytesIO
@@ -25,6 +25,7 @@ class Mobile:
         self._mcp_init_attempted = False
         self._mcp_error_count = 0  # Track consecutive MCP Helper errors
         self._mcp_max_consecutive_errors = 3  # Only disable after 3 consecutive errors
+        self._screen_size: tuple[int, int] | None = None
     
     def _init_mcp_helper(self):
         """Lazy initialization of MCP Helper (only when first needed)"""
@@ -64,6 +65,28 @@ class Mobile:
         self._ensure_connected()
         return self.device
 
+    def _get_screen_size(self) -> tuple[int, int]:
+        """Get screen dimensions via ADB, cached after first call."""
+        if self._screen_size is not None:
+            return self._screen_size
+        try:
+            cmd = ["adb"]
+            if self.device_id:
+                cmd.extend(["-s", self.device_id])
+            cmd.extend(["shell", "wm", "size"])
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            # Parse "Physical size: 1080x1920"
+            for line in result.stdout.strip().splitlines():
+                if "size:" in line.lower():
+                    size_str = line.split(":")[-1].strip()
+                    w, h = size_str.split("x")
+                    self._screen_size = (int(w), int(h))
+                    return self._screen_size
+        except Exception:
+            pass
+        self._screen_size = (0, 0)
+        return self._screen_size
+
     def get_state(self, use_vision=False):
         try:
             # Lazy initialize MCP Helper on first use
@@ -86,6 +109,21 @@ class Mobile:
                     # Success - reset error count
                     self._mcp_error_count = 0
 
+                    # Build device context from MCP Helper phone state
+                    try:
+                        phone_state = self.mcp_adapter.get_phone_state()
+                        sw, sh = self._get_screen_size()
+                        device_context = DeviceContext(
+                            current_app=phone_state.get("packageName", ""),
+                            current_activity=phone_state.get("activityName", ""),
+                            keyboard_visible=phone_state.get("keyboardVisible", False),
+                            screen_width=sw,
+                            screen_height=sh,
+                        )
+                    except Exception:
+                        sw, sh = self._get_screen_size()
+                        device_context = DeviceContext(screen_width=sw, screen_height=sh)
+
                     if use_vision:
                         self._ensure_connected()  # Need device for screenshot
                         nodes = tree_state.interactive_elements
@@ -95,7 +133,7 @@ class Mobile:
                     else:
                         screenshot = None
 
-                    return MobileState(tree_state=tree_state, screenshot=screenshot)
+                    return MobileState(tree_state=tree_state, screenshot=screenshot, device_context=device_context)
                 except Exception as mcp_error:
                     # Increment error counter instead of permanently disabling
                     self._mcp_error_count += 1
@@ -118,6 +156,10 @@ class Mobile:
                 self._state_cache = tree_state
                 self._cache_timestamp = current_time
 
+            # Build device context with screen size only (UIAutomator2 fallback)
+            sw, sh = self._get_screen_size()
+            device_context = DeviceContext(screen_width=sw, screen_height=sh)
+
             if use_vision:
                 nodes = tree_state.interactive_elements
                 tree = Tree(self)
@@ -126,7 +168,7 @@ class Mobile:
             else:
                 screenshot = None
 
-            return MobileState(tree_state=tree_state, screenshot=screenshot)
+            return MobileState(tree_state=tree_state, screenshot=screenshot, device_context=device_context)
         except Exception as e:
             raise RuntimeError(f"Failed to get device state: {e}")
     

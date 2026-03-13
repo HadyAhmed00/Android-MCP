@@ -1,4 +1,4 @@
-from src.tree.views import TreeState, ElementNode, CenterCord, BoundingBox
+from src.tree.views import TreeState, ElementNode, CenterCord, BoundingBox, classify_element
 from src.tree.utils import extract_cordinates,get_center_cordinates
 from src.tree.config import INTERACTIVE_CLASSES
 from PIL import Image, ImageFont, ImageDraw
@@ -33,10 +33,13 @@ class Tree:
                 if not name:
                     continue
                 x_center,y_center = get_center_cordinates((x1,y1,x2,y2))
+                class_name = node.get('class', '')
                 interactive_elements.append(ElementNode(**{
                     'name':name,
                     'coordinates':CenterCord(x=x_center,y=y_center),
-                    'bounding_box':BoundingBox(x1=x1,y1=y1,x2=x2,y2=y2)
+                    'bounding_box':BoundingBox(x1=x1,y1=y1,x2=x2,y2=y2),
+                    'element_type':classify_element(class_name),
+                    'element_class':class_name,
                 }))
         return interactive_elements
 

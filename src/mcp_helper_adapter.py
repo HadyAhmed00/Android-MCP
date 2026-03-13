@@ -7,7 +7,7 @@ expected Tree and Mobile state formats.
 from dataclasses import dataclass
 from typing import List, Optional
 from src.mcp_helper import MCPHelperClient, A11yTreeNode, A11yFullNode
-from src.tree.views import ElementNode, CenterCord, BoundingBox, TreeState
+from src.tree.views import ElementNode, CenterCord, BoundingBox, TreeState, classify_element
 
 
 @dataclass
@@ -74,7 +74,9 @@ class MCPHelperTreeAdapter:
                     y1=bounds.y1,
                     x2=bounds.x2,
                     y2=bounds.y2
-                )
+                ),
+                element_type=classify_element(node.className),
+                element_class=node.className,
             )
             elements.append(element)
 
@@ -133,7 +135,9 @@ class MCPHelperTreeAdapter:
                     y1=bounds["top"],
                     x2=bounds["right"],
                     y2=bounds["bottom"]
-                )
+                ),
+                element_type=classify_element(node.className),
+                element_class=node.className,
             )
             elements.append(element)
 
