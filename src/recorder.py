@@ -310,7 +310,7 @@ class TestRecorder:
             activity = action.screen_activity or ""
             app = action.screen_app or ""
             screen = f"{app}/{activity}" if app and activity else (app or activity)
-            parts[0] += f" — {screen}"
+            parts[0] += f" -- {screen}"
         return "# " + parts[0]
 
     def _generate_action_code_uiautomator(self, action: TestAction, action_num: int) -> str:
