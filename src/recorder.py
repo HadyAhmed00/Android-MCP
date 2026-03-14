@@ -15,6 +15,10 @@ class TestAction:
     parameters: dict
     result: str = ""
     description: str = ""
+    element_name: str = ""     # "Login" — human name of tapped element
+    element_type: str = ""     # "button", "input", etc.
+    screen_app: str = ""       # "io.github.hadyahmed00.quicktasks_dimo"
+    screen_activity: str = ""  # ".LoginActivity"
 
     def to_dict(self):
         return asdict(self)
@@ -38,7 +42,10 @@ class TestRecorder:
         """Stop recording actions."""
         self.is_recording = False
 
-    def record_action(self, action: str, parameters: dict, result: str = "", description: str = ""):
+    def record_action(self, action: str, parameters: dict, result: str = "",
+                      description: str = "", element_name: str = "",
+                      element_type: str = "", screen_app: str = "",
+                      screen_activity: str = ""):
         """Record a single action."""
         if not self.is_recording:
             return
@@ -49,7 +56,11 @@ class TestRecorder:
             timestamp=timestamp,
             parameters=parameters,
             result=result,
-            description=description
+            description=description,
+            element_name=element_name,
+            element_type=element_type,
+            screen_app=screen_app,
+            screen_activity=screen_activity,
         )
         self.actions.append(test_action)
 
@@ -71,9 +82,7 @@ class TestRecorder:
         data = {
             "test_name": filename.replace(".json", ""),
             "start_time": self.start_time.isoformat(),
-            "duration_seconds": sum(
-                action.timestamp for action in self.actions
-            ) if self.actions else 0,
+            "duration_seconds": self.actions[-1].timestamp if self.actions else 0,
             "total_actions": len(self.actions),
             "actions": [action.to_dict() for action in self.actions]
         }
@@ -105,6 +114,17 @@ class TestRecorder:
         else:
             return self._export_as_uiautomator_python(filepath, test_name)
 
+    def _normalize_delay(self, time_diff: float) -> tuple[float, str]:
+        """Normalize AI thinking delays to realistic replay delays.
+
+        Returns (sleep_seconds, comment) tuple.
+        """
+        if time_diff > 1.5:
+            return (1.0, "navigation wait")
+        elif time_diff > 0.5:
+            return (0.3, "")
+        return (0, "")
+
     def _export_as_uiautomator_python(self, filepath: Path, test_name: str) -> str:
         """Export as uiautomator2-based script (original behavior)."""
         script_lines = [
@@ -129,8 +149,10 @@ class TestRecorder:
             if i > 1:
                 prev_action = self.actions[i-2]
                 time_diff = action.timestamp - prev_action.timestamp
-                if time_diff > 0.5:  # Add delay if there was a significant gap
-                    wait_before = f"    time.sleep({time_diff:.1f})\n"
+                sleep_secs, delay_comment = self._normalize_delay(time_diff)
+                if sleep_secs > 0:
+                    comment = f"  # {delay_comment}" if delay_comment else ""
+                    wait_before = f"    time.sleep({sleep_secs:.1f}){comment}\n"
 
             script_lines.append(wait_before)
             script_lines.append(self._generate_action_code_uiautomator(action, i))
@@ -223,6 +245,19 @@ class TestRecorder:
             '        cmd = f"adb -s {self.device_id} shell cmd statusbar expand-notifications"',
             '        subprocess.run(cmd, shell=True)',
             '    ',
+            '    def get_current_app(self):',
+            '        """Returns current foreground package name via ADB."""',
+            '        cmd = f"adb -s {self.device_id} shell dumpsys activity activities | grep mCurrentFocus"',
+            '        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)',
+            '        return result.stdout.strip()',
+            '    ',
+            '    def screenshot(self, path):',
+            '        """Capture screenshot via ADB screencap."""',
+            '        cmd = f"adb -s {self.device_id} exec-out screencap -p"',
+            '        result = subprocess.run(cmd, shell=True, capture_output=True)',
+            '        with open(path, "wb") as f:',
+            '            f.write(result.stdout)',
+            '    ',
             '',
             'def run_test(device_id="emulator-5554"):',
             '    """Run the recorded test sequence."""',
@@ -237,8 +272,10 @@ class TestRecorder:
             if i > 1:
                 prev_action = self.actions[i-2]
                 time_diff = action.timestamp - prev_action.timestamp
-                if time_diff > 0.5:  # Add delay if there was a significant gap
-                    wait_before = f"    time.sleep({time_diff:.1f})\n"
+                sleep_secs, delay_comment = self._normalize_delay(time_diff)
+                if sleep_secs > 0:
+                    comment = f"  # {delay_comment}" if delay_comment else ""
+                    wait_before = f"    time.sleep({sleep_secs:.1f}){comment}\n"
 
             script_lines.append(wait_before)
             script_lines.append(self._generate_action_code_adb(action, i))
@@ -266,40 +303,69 @@ class TestRecorder:
 
         return str(filepath)
 
+    def _make_step_comment(self, action: TestAction, action_num: int, action_label: str) -> str:
+        """Build a step comment with optional element/screen context."""
+        parts = [f"Step {action_num}: {action_label}"]
+        if action.screen_app or action.screen_activity:
+            activity = action.screen_activity or ""
+            app = action.screen_app or ""
+            screen = f"{app}/{activity}" if app and activity else (app or activity)
+            parts[0] += f" — {screen}"
+        return "# " + parts[0]
+
     def _generate_action_code_uiautomator(self, action: TestAction, action_num: int) -> str:
         """Generate Python code for a single action using uiautomator2."""
         params = action.parameters
         indent = "    "
 
         if action.action == "click":
-            return f'{indent}# Action {action_num}: Click at ({params["x"]}, {params["y"]})\n{indent}device.click({params["x"]}, {params["y"]})'
+            comment = self._make_step_comment(action, action_num, f'Tap at ({params["x"]}, {params["y"]})')
+            return f'{indent}{comment}\n{indent}device.click({params["x"]}, {params["y"]})'
+
+        elif action.action == "click_by_label":
+            name = params.get("name", "")
+            etype = action.element_type or "element"
+            label = f'Tap "{name}" {etype} at ({params["x"]}, {params["y"]})'
+            comment = self._make_step_comment(action, action_num, label)
+            return f'{indent}{comment}\n{indent}device.click({params["x"]}, {params["y"]})'
 
         elif action.action == "long_click":
-            return f'{indent}# Action {action_num}: Long click at ({params["x"]}, {params["y"]})\n{indent}device.long_click({params["x"]}, {params["y"]})'
+            comment = self._make_step_comment(action, action_num, f'Long press at ({params["x"]}, {params["y"]})')
+            return f'{indent}{comment}\n{indent}device.long_click({params["x"]}, {params["y"]})'
 
         elif action.action == "swipe":
-            return f'{indent}# Action {action_num}: Swipe from ({params["x1"]}, {params["y1"]}) to ({params["x2"]}, {params["y2"]})\n{indent}device.swipe({params["x1"]}, {params["y1"]}, {params["x2"]}, {params["y2"]})'
+            comment = self._make_step_comment(action, action_num, f'Swipe from ({params["x1"]}, {params["y1"]}) to ({params["x2"]}, {params["y2"]})')
+            return f'{indent}{comment}\n{indent}device.swipe({params["x1"]}, {params["y1"]}, {params["x2"]}, {params["y2"]})'
 
         elif action.action == "type":
             text = params["text"].replace('"', '\\"')
-            return f'{indent}# Action {action_num}: Type "{text}"\n{indent}device.send_keys("{text}")'
+            field_name = action.element_name or f'({params["x"]}, {params["y"]})'
+            comment = self._make_step_comment(action, action_num, f'Type "{text}" in {field_name}')
+            lines = f'{indent}{comment}\n'
+            lines += f'{indent}device.click({params["x"]}, {params["y"]})\n'
+            lines += f'{indent}device.send_keys("{text}")'
+            return lines
 
         elif action.action == "drag":
-            return f'{indent}# Action {action_num}: Drag from ({params["x1"]}, {params["y1"]}) to ({params["x2"]}, {params["y2"]})\n{indent}device.drag({params["x1"]}, {params["y1"]}, {params["x2"]}, {params["y2"]})'
+            comment = self._make_step_comment(action, action_num, f'Drag from ({params["x1"]}, {params["y1"]}) to ({params["x2"]}, {params["y2"]})')
+            return f'{indent}{comment}\n{indent}device.drag({params["x1"]}, {params["y1"]}, {params["x2"]}, {params["y2"]})'
 
         elif action.action == "press":
             button = params["button"]
-            return f'{indent}# Action {action_num}: Press {button} button\n{indent}device.press("{button}")'
+            comment = self._make_step_comment(action, action_num, f'Press {button} button')
+            return f'{indent}{comment}\n{indent}device.press("{button}")'
 
         elif action.action == "notification":
-            return f'{indent}# Action {action_num}: Open notification bar\n{indent}device.open_notification()'
+            comment = self._make_step_comment(action, action_num, 'Open notification bar')
+            return f'{indent}{comment}\n{indent}device.open_notification()'
 
         elif action.action == "wait":
             duration = params["duration"]
-            return f'{indent}# Action {action_num}: Wait {duration} seconds\n{indent}time.sleep({duration})'
+            comment = self._make_step_comment(action, action_num, f'Wait {duration} seconds')
+            return f'{indent}{comment}\n{indent}time.sleep({duration})'
 
         else:
-            return f'{indent}# Action {action_num}: {action.action} {params}'
+            return f'{indent}# Step {action_num}: {action.action} {params}'
 
     def _generate_action_code_adb(self, action: TestAction, action_num: int) -> str:
         """Generate Python code for a single action using direct ADB commands."""
@@ -307,34 +373,212 @@ class TestRecorder:
         indent = "    "
 
         if action.action == "click":
-            return f'{indent}# Action {action_num}: Click at ({params["x"]}, {params["y"]})\n{indent}device.click({params["x"]}, {params["y"]})'
+            comment = self._make_step_comment(action, action_num, f'Tap at ({params["x"]}, {params["y"]})')
+            return f'{indent}{comment}\n{indent}device.click({params["x"]}, {params["y"]})'
+
+        elif action.action == "click_by_label":
+            name = params.get("name", "")
+            etype = action.element_type or "element"
+            label = f'Tap "{name}" {etype} at ({params["x"]}, {params["y"]})'
+            comment = self._make_step_comment(action, action_num, label)
+            return f'{indent}{comment}\n{indent}device.click({params["x"]}, {params["y"]})'
 
         elif action.action == "long_click":
-            return f'{indent}# Action {action_num}: Long click at ({params["x"]}, {params["y"]})\n{indent}device.long_click({params["x"]}, {params["y"]})'
+            comment = self._make_step_comment(action, action_num, f'Long press at ({params["x"]}, {params["y"]})')
+            return f'{indent}{comment}\n{indent}device.long_click({params["x"]}, {params["y"]})'
 
         elif action.action == "swipe":
-            return f'{indent}# Action {action_num}: Swipe from ({params["x1"]}, {params["y1"]}) to ({params["x2"]}, {params["y2"]})\n{indent}device.swipe({params["x1"]}, {params["y1"]}, {params["x2"]}, {params["y2"]})'
+            comment = self._make_step_comment(action, action_num, f'Swipe from ({params["x1"]}, {params["y1"]}) to ({params["x2"]}, {params["y2"]})')
+            return f'{indent}{comment}\n{indent}device.swipe({params["x1"]}, {params["y1"]}, {params["x2"]}, {params["y2"]})'
 
         elif action.action == "type":
             text = params["text"].replace('"', '\\"')
-            return f'{indent}# Action {action_num}: Type "{text}"\n{indent}device.type_text("{text}")'
+            field_name = action.element_name or f'({params["x"]}, {params["y"]})'
+            comment = self._make_step_comment(action, action_num, f'Type "{text}" in {field_name}')
+            lines = f'{indent}{comment}\n'
+            lines += f'{indent}device.click({params["x"]}, {params["y"]})\n'
+            lines += f'{indent}device.type_text("{text}")'
+            return lines
 
         elif action.action == "drag":
-            return f'{indent}# Action {action_num}: Drag from ({params["x1"]}, {params["y1"]}) to ({params["x2"]}, {params["y2"]})\n{indent}device.drag({params["x1"]}, {params["y1"]}, {params["x2"]}, {params["y2"]})'
+            comment = self._make_step_comment(action, action_num, f'Drag from ({params["x1"]}, {params["y1"]}) to ({params["x2"]}, {params["y2"]})')
+            return f'{indent}{comment}\n{indent}device.drag({params["x1"]}, {params["y1"]}, {params["x2"]}, {params["y2"]})'
 
         elif action.action == "press":
             button = params["button"]
-            return f'{indent}# Action {action_num}: Press {button} button\n{indent}device.press_key("{button}")'
+            comment = self._make_step_comment(action, action_num, f'Press {button} button')
+            return f'{indent}{comment}\n{indent}device.press_key("{button}")'
 
         elif action.action == "notification":
-            return f'{indent}# Action {action_num}: Open notification bar\n{indent}device.open_notification()'
+            comment = self._make_step_comment(action, action_num, 'Open notification bar')
+            return f'{indent}{comment}\n{indent}device.open_notification()'
 
         elif action.action == "wait":
             duration = params["duration"]
-            return f'{indent}# Action {action_num}: Wait {duration} seconds\n{indent}time.sleep({duration})'
+            comment = self._make_step_comment(action, action_num, f'Wait {duration} seconds')
+            return f'{indent}{comment}\n{indent}time.sleep({duration})'
 
         else:
-            return f'{indent}# Action {action_num}: {action.action} {params}'
+            return f'{indent}# Step {action_num}: {action.action} {params}'
+
+    def export_as_pytest(self, filename: str = None, test_name: str = None) -> str:
+        """Export recorded actions as a pytest-compatible test file."""
+        if not filename:
+            timestamp = self.start_time.strftime("%Y%m%d_%H%M%S")
+            filename = f"test_{timestamp}_pytest.py"
+
+        if not test_name:
+            test_name = filename.replace(".py", "").replace("-", "_")
+            # Ensure valid Python identifier
+            test_name = ''.join(c if c.isalnum() or c == '_' else '_' for c in test_name)
+
+        filepath = Path(filename)
+
+        # Build class name from test_name (PascalCase)
+        class_name = ''.join(word.capitalize() for word in test_name.split('_') if word)
+
+        script_lines = [
+            '"""',
+            f'Auto-generated pytest test: {test_name}',
+            f'Generated: {self.start_time.isoformat()}',
+            f'Total actions: {len(self.actions)}',
+            '',
+            'Run with: pytest {filename} -v',
+            '"""',
+            '',
+            'import subprocess',
+            'import time',
+            'import pytest',
+            '',
+            '',
+            'class DeviceController:',
+            '    """Direct ADB device controller - no external dependencies."""',
+            '    ',
+            '    def __init__(self, device_id="emulator-5554"):',
+            '        self.device_id = device_id',
+            '        self._verify_device()',
+            '    ',
+            '    def _verify_device(self):',
+            '        """Verify device is connected."""',
+            '        result = subprocess.run(["adb", "devices"], capture_output=True, text=True)',
+            '        if self.device_id not in result.stdout:',
+            '            raise Exception(f"Device {self.device_id} not found. Available devices:\\n{result.stdout}")',
+            '    ',
+            '    def click(self, x, y):',
+            '        """Click at coordinates."""',
+            '        cmd = f"adb -s {self.device_id} shell input tap {x} {y}"',
+            '        subprocess.run(cmd, shell=True)',
+            '    ',
+            '    def long_click(self, x, y, duration=1000):',
+            '        """Long click at coordinates."""',
+            '        cmd = f"adb -s {self.device_id} shell input touchscreen swipe {x} {y} {x} {y} {duration}"',
+            '        subprocess.run(cmd, shell=True)',
+            '    ',
+            '    def swipe(self, x1, y1, x2, y2, duration=300):',
+            '        """Swipe from one point to another."""',
+            '        cmd = f"adb -s {self.device_id} shell input touchscreen swipe {x1} {y1} {x2} {y2} {duration}"',
+            '        subprocess.run(cmd, shell=True)',
+            '    ',
+            '    def drag(self, x1, y1, x2, y2, duration=500):',
+            '        """Drag from one point to another."""',
+            '        cmd = f"adb -s {self.device_id} shell input touchscreen swipe {x1} {y1} {x2} {y2} {duration}"',
+            '        subprocess.run(cmd, shell=True)',
+            '    ',
+            '    def type_text(self, text):',
+            '        """Type text on device."""',
+            '        cmd = f"adb -s {self.device_id} shell input text \\"{text}\\""',
+            '        subprocess.run(cmd, shell=True)',
+            '    ',
+            '    def press_key(self, key_code):',
+            '        """Press a key code."""',
+            '        key_map = {',
+            '            "ENTER": "66",',
+            '            "BACK": "4",',
+            '            "HOME": "3",',
+            '            "MENU": "1",',
+            '            "POWER": "26",',
+            '            "VOLUME_UP": "24",',
+            '            "VOLUME_DOWN": "25",',
+            '        }',
+            '        code = key_map.get(key_code.upper(), key_code)',
+            '        cmd = f"adb -s {self.device_id} shell input keyevent {code}"',
+            '        subprocess.run(cmd, shell=True)',
+            '    ',
+            '    def open_notification(self):',
+            '        """Open notification bar."""',
+            '        cmd = f"adb -s {self.device_id} shell cmd statusbar expand-notifications"',
+            '        subprocess.run(cmd, shell=True)',
+            '    ',
+            '    def get_current_app(self):',
+            '        """Returns current foreground package name via ADB."""',
+            '        cmd = f"adb -s {self.device_id} shell dumpsys activity activities | grep mCurrentFocus"',
+            '        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)',
+            '        return result.stdout.strip()',
+            '    ',
+            '    def screenshot(self, path):',
+            '        """Capture screenshot via ADB screencap."""',
+            '        cmd = f"adb -s {self.device_id} exec-out screencap -p"',
+            '        result = subprocess.run(cmd, shell=True, capture_output=True)',
+            '        with open(path, "wb") as f:',
+            '            f.write(result.stdout)',
+            '    ',
+            '',
+            '',
+            '@pytest.fixture(scope="module")',
+            'def device():',
+            '    """Create a device controller for the test module."""',
+            '    d = DeviceController("emulator-5554")',
+            '    yield d',
+            '',
+            '',
+            f'class Test{class_name}:',
+            f'    """Recorded test: {test_name}"""',
+            '',
+            f'    def test_{test_name}(self, device, request):',
+            '        try:',
+        ]
+
+        test_indent = "            "
+        for i, action in enumerate(self.actions, 1):
+            if i > 1:
+                prev_action = self.actions[i-2]
+                time_diff = action.timestamp - prev_action.timestamp
+                sleep_secs, delay_comment = self._normalize_delay(time_diff)
+                if sleep_secs > 0:
+                    comment = f"  # {delay_comment}" if delay_comment else ""
+                    script_lines.append(f"{test_indent}time.sleep({sleep_secs:.1f}){comment}")
+
+            # Generate action code with deeper indent for pytest
+            action_code = self._generate_action_code_adb(action, i)
+            # Re-indent from 4 spaces to 12 spaces (test method body inside try)
+            reindented = action_code.replace("    ", test_indent, 1)
+            # Handle multi-line actions
+            lines = reindented.split('\n')
+            result_lines = []
+            for j, line in enumerate(lines):
+                if j == 0:
+                    result_lines.append(line)
+                else:
+                    # Replace leading 4-space indent with test indent
+                    if line.startswith("    "):
+                        result_lines.append(test_indent + line[4:])
+                    else:
+                        result_lines.append(line)
+            script_lines.append('\n'.join(result_lines))
+
+        script_lines.extend([
+            '        except Exception as e:',
+            '            # Screenshot on failure',
+            '            device.screenshot(f"failure_{request.node.name}.png")',
+            '            raise',
+        ])
+
+        script_content = '\n'.join(script_lines)
+
+        with open(filepath, 'w') as f:
+            f.write(script_content)
+
+        return str(filepath)
 
     def export_as_readable(self, filename: str = None) -> str:
         """Export recorded actions as human-readable test steps."""
@@ -358,6 +602,9 @@ class TestRecorder:
         for i, action in enumerate(self.actions, 1):
             description = self._get_action_description(action, i)
             lines.append(f"{i}. {description}")
+            if action.screen_app or action.screen_activity:
+                screen = f"{action.screen_app}/{action.screen_activity}" if action.screen_app and action.screen_activity else (action.screen_app or action.screen_activity)
+                lines.append(f"   Screen: {screen}")
             if action.description:
                 lines.append(f"   Note: {action.description}")
             lines.append("")
@@ -372,13 +619,20 @@ class TestRecorder:
         params = action.parameters
 
         if action.action == "click":
-            return f"Click at coordinates ({params['x']}, {params['y']})"
+            if action.element_name:
+                return f"Tap '{action.element_name}' ({action.element_type or 'element'}) at ({params['x']}, {params['y']})"
+            return f"Tap at coordinates ({params['x']}, {params['y']})"
+        elif action.action == "click_by_label":
+            name = params.get("name", "")
+            etype = action.element_type or "element"
+            return f"Tap '{name}' ({etype}) at ({params['x']}, {params['y']})"
         elif action.action == "long_click":
-            return f"Long click at coordinates ({params['x']}, {params['y']})"
+            return f"Long press at coordinates ({params['x']}, {params['y']})"
         elif action.action == "swipe":
             return f"Swipe from ({params['x1']}, {params['y1']}) to ({params['x2']}, {params['y2']})"
         elif action.action == "type":
-            return f"Type text: \"{params['text']}\""
+            field = f" in '{action.element_name}'" if action.element_name else ""
+            return f'Type text: "{params["text"]}"{field}'
         elif action.action == "drag":
             return f"Drag from ({params['x1']}, {params['y1']}) to ({params['x2']}, {params['y2']})"
         elif action.action == "press":

@@ -26,6 +26,9 @@ class Mobile:
         self._mcp_error_count = 0  # Track consecutive MCP Helper errors
         self._mcp_max_consecutive_errors = 3  # Only disable after 3 consecutive errors
         self._screen_size: tuple[int, int] | None = None
+        self._uia_state_cache = None  # Separate cache for UIAutomator path
+        self._uia_cache_timestamp = 0
+        self._last_device_context: Optional[DeviceContext] = None
     
     def _init_mcp_helper(self):
         """Lazy initialization of MCP Helper (only when first needed)"""
@@ -124,6 +127,8 @@ class Mobile:
                         sw, sh = self._get_screen_size()
                         device_context = DeviceContext(screen_width=sw, screen_height=sh)
 
+                    self._last_device_context = device_context
+
                     if use_vision:
                         self._ensure_connected()  # Need device for screenshot
                         nodes = tree_state.interactive_elements
@@ -148,17 +153,42 @@ class Mobile:
             # Fallback to UIAutomator if MCP Helper unavailable
             self._ensure_connected()
             current_time = time.time()
-            if self._state_cache and (current_time - self._cache_timestamp) < self._cache_ttl:
-                tree_state = self._state_cache
+            if self._uia_state_cache and (current_time - self._uia_cache_timestamp) < self._cache_ttl:
+                tree_state = self._uia_state_cache
             else:
                 tree = Tree(self)
                 tree_state = tree.get_state()
-                self._state_cache = tree_state
-                self._cache_timestamp = current_time
+                self._uia_state_cache = tree_state
+                self._uia_cache_timestamp = current_time
 
-            # Build device context with screen size only (UIAutomator2 fallback)
+            # Build device context with screen size and app/activity via ADB dumpsys
             sw, sh = self._get_screen_size()
-            device_context = DeviceContext(screen_width=sw, screen_height=sh)
+            current_app = ""
+            current_activity = ""
+            try:
+                cmd = ["adb"]
+                if self.device_id:
+                    cmd.extend(["-s", self.device_id])
+                cmd.extend(["shell", "dumpsys activity activities"])
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                for line in result.stdout.splitlines():
+                    if "mCurrentFocus" in line or "mFocusedApp" in line:
+                        # Parse "mCurrentFocus=Window{... pkg/activity}"
+                        import re
+                        match = re.search(r'(\S+)/(\S+)\}', line)
+                        if match:
+                            current_app = match.group(1)
+                            current_activity = match.group(2)
+                        break
+            except Exception:
+                pass
+            device_context = DeviceContext(
+                current_app=current_app,
+                current_activity=current_activity,
+                screen_width=sw,
+                screen_height=sh,
+            )
+            self._last_device_context = device_context
 
             if use_vision:
                 nodes = tree_state.interactive_elements
