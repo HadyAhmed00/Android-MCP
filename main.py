@@ -57,9 +57,25 @@ mobile=Mobile(device=device_id, use_mcp_helper=True)
 recorder=TestRecorder()
 
 def _get_screen_context() -> tuple:
-    """Read current app/activity from cached state without triggering a new fetch."""
+    """Get current foreground app/activity via ADB dumpsys.
+
+    Actively queries the device so that every recorded action has accurate
+    screen context — even if State-Tool hasn't been called recently.
+    """
+    import re as _re
     try:
-        if mobile._state_cache and hasattr(mobile, '_last_device_context') and mobile._last_device_context:
+        output = adb_shell("dumpsys activity activities")
+        for line in output.splitlines():
+            if "mCurrentFocus" in line or "mFocusedApp" in line:
+                match = _re.search(r'(\S+)/(\S+)\}', line)
+                if match:
+                    return (match.group(1), match.group(2))
+                break
+    except Exception:
+        pass
+    # Fallback to cached context if ADB call fails
+    try:
+        if hasattr(mobile, '_last_device_context') and mobile._last_device_context:
             ctx = mobile._last_device_context
             return (ctx.current_app, ctx.current_activity)
     except Exception:
@@ -215,19 +231,20 @@ def start_recording_tool():
     recorder.start()
     return 'Test recording started. All subsequent actions will be recorded.'
 
-@mcp.tool(name='Stop-Recording-Tool',description='Stop recording test actions')
+@mcp.tool(name='Stop-Recording-Tool',description='Stop recording test actions. After stopping, use Export-Test-Script with format="pytest" to generate a test with assertions.')
 def stop_recording_tool():
     recorder.stop()
-    return f'Test recording stopped. {len(recorder.get_actions())} actions recorded.'
+    count = len(recorder.get_actions())
+    return f'Test recording stopped. {count} actions recorded. Use Export-Test-Script format="pytest" to export as a test with assertions.'
 
-@mcp.tool(name='Export-Test-Script',description='Export recorded test actions as executable test script. Supported formats: python, pytest, json, readable')
-def export_test_script(format:str='python',filename:str=None,test_name:str=None)->str:
+@mcp.tool(name='Export-Test-Script',description='Export recorded test actions as a test script. Use format="pytest" for a real test with assertions that verify screen navigation and app state. Use format="python" for a simple replay script. Also supports "json" and "readable".')
+def export_test_script(format:str='pytest',filename:str=None,test_name:str=None)->str:
     """
     Export recorded test actions.
 
     Parameters:
-    - format: 'python' (executable Python script), 'pytest' (pytest-compatible test), 'json' (JSON data), 'readable' (human-readable steps)
-    - filename: Optional custom filename (without extension)
+    - format: 'pytest' (DEFAULT — pytest test with assertions verifying screen transitions, app alive checks, and screenshot-on-failure), 'python' (simple replay script), 'json' (JSON data), 'readable' (human-readable steps)
+    - filename: Optional custom filename
     - test_name: Optional custom test name for Python/pytest exports
     """
     try:
