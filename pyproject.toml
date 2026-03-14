@@ -23,3 +23,6 @@ dependencies = [
 
 [project.scripts]
 android-mcp = "main:mcp"
+
+[dependency-groups]
+dev = []

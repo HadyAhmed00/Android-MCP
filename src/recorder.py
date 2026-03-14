@@ -421,8 +421,83 @@ class TestRecorder:
         else:
             return f'{indent}# Step {action_num}: {action.action} {params}'
 
+    def _compute_assertions(self) -> dict:
+        """Pre-compute assertion data by analyzing screen transitions between actions.
+
+        Returns a dict mapping action index (0-based) to a list of assertion dicts.
+        Each assertion dict has: type, expected, message.
+        """
+        assertions = {}
+        for i, action in enumerate(self.actions):
+            action_asserts = []
+            next_action = self.actions[i + 1] if i + 1 < len(self.actions) else None
+
+            # Detect screen transition: next action has different app or activity
+            if next_action and next_action.screen_app:
+                app_changed = (action.screen_app and
+                               next_action.screen_app != action.screen_app)
+                activity_changed = (action.screen_activity and
+                                    next_action.screen_activity and
+                                    next_action.screen_activity != action.screen_activity)
+
+                if app_changed:
+                    action_asserts.append({
+                        'type': 'app',
+                        'expected': next_action.screen_app,
+                        'message': f'Expected to navigate to {next_action.screen_app}',
+                    })
+                if activity_changed:
+                    action_asserts.append({
+                        'type': 'activity',
+                        'expected': next_action.screen_activity,
+                        'message': f'Expected screen {next_action.screen_activity}',
+                    })
+                elif not app_changed and action.action in ('click_by_label', 'click', 'press'):
+                    # Same screen — assert app didn't crash
+                    action_asserts.append({
+                        'type': 'app_alive',
+                        'expected': action.screen_app or next_action.screen_app,
+                        'message': 'App should still be in foreground',
+                    })
+
+            # After type: assert app didn't crash
+            if action.action == 'type' and action.screen_app and not action_asserts:
+                action_asserts.append({
+                    'type': 'app_alive',
+                    'expected': action.screen_app,
+                    'message': 'App should still be in foreground after typing',
+                })
+
+            if action_asserts:
+                assertions[i] = action_asserts
+
+        return assertions
+
+    def _generate_assertion_code(self, asserts: list, indent: str) -> str:
+        """Generate Python assertion lines from assertion dicts."""
+        lines = []
+        for a in asserts:
+            if a['type'] == 'activity':
+                lines.append(f'{indent}time.sleep(0.5)  # wait for navigation')
+                lines.append(
+                    f'{indent}assert "{a["expected"]}" in device.get_current_activity(), '
+                    f'"{a["message"]}"'
+                )
+            elif a['type'] == 'app':
+                lines.append(f'{indent}time.sleep(0.5)  # wait for navigation')
+                lines.append(
+                    f'{indent}assert "{a["expected"]}" in device.get_current_app(), '
+                    f'"{a["message"]}"'
+                )
+            elif a['type'] == 'app_alive':
+                lines.append(
+                    f'{indent}assert "{a["expected"]}" in device.get_current_app(), '
+                    f'"{a["message"]}"'
+                )
+        return '\n'.join(lines)
+
     def export_as_pytest(self, filename: str = None, test_name: str = None) -> str:
-        """Export recorded actions as a pytest-compatible test file."""
+        """Export recorded actions as a pytest-compatible test file with assertions."""
         if not filename:
             timestamp = self.start_time.strftime("%Y%m%d_%H%M%S")
             filename = f"test_{timestamp}_pytest.py"
@@ -437,16 +512,21 @@ class TestRecorder:
         # Build class name from test_name (PascalCase)
         class_name = ''.join(word.capitalize() for word in test_name.split('_') if word)
 
+        # Pre-compute assertions from screen transition analysis
+        assertions = self._compute_assertions()
+
         script_lines = [
             '"""',
             f'Auto-generated pytest test: {test_name}',
             f'Generated: {self.start_time.isoformat()}',
             f'Total actions: {len(self.actions)}',
+            f'Assertions: {sum(len(v) for v in assertions.values())}',
             '',
-            'Run with: pytest {filename} -v',
+            f'Run with: pytest {filename} -v',
             '"""',
             '',
             'import subprocess',
+            'import re',
             'import time',
             'import pytest',
             '',
@@ -464,63 +544,77 @@ class TestRecorder:
             '        if self.device_id not in result.stdout:',
             '            raise Exception(f"Device {self.device_id} not found. Available devices:\\n{result.stdout}")',
             '    ',
+            '    def _adb(self, *args):',
+            '        """Run an ADB command and return stdout."""',
+            '        cmd = ["adb", "-s", self.device_id] + list(args)',
+            '        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)',
+            '        return result.stdout.strip()',
+            '    ',
             '    def click(self, x, y):',
             '        """Click at coordinates."""',
-            '        cmd = f"adb -s {self.device_id} shell input tap {x} {y}"',
-            '        subprocess.run(cmd, shell=True)',
+            '        self._adb("shell", f"input tap {x} {y}")',
             '    ',
             '    def long_click(self, x, y, duration=1000):',
             '        """Long click at coordinates."""',
-            '        cmd = f"adb -s {self.device_id} shell input touchscreen swipe {x} {y} {x} {y} {duration}"',
-            '        subprocess.run(cmd, shell=True)',
+            '        self._adb("shell", f"input touchscreen swipe {x} {y} {x} {y} {duration}")',
             '    ',
             '    def swipe(self, x1, y1, x2, y2, duration=300):',
             '        """Swipe from one point to another."""',
-            '        cmd = f"adb -s {self.device_id} shell input touchscreen swipe {x1} {y1} {x2} {y2} {duration}"',
-            '        subprocess.run(cmd, shell=True)',
+            '        self._adb("shell", f"input touchscreen swipe {x1} {y1} {x2} {y2} {duration}")',
             '    ',
             '    def drag(self, x1, y1, x2, y2, duration=500):',
             '        """Drag from one point to another."""',
-            '        cmd = f"adb -s {self.device_id} shell input touchscreen swipe {x1} {y1} {x2} {y2} {duration}"',
-            '        subprocess.run(cmd, shell=True)',
+            '        self._adb("shell", f"input touchscreen swipe {x1} {y1} {x2} {y2} {duration}")',
             '    ',
             '    def type_text(self, text):',
             '        """Type text on device."""',
-            '        cmd = f"adb -s {self.device_id} shell input text \\"{text}\\""',
-            '        subprocess.run(cmd, shell=True)',
+            "        escaped = text.replace(' ', '%s').replace(\"'\", \"\\\\\\\\'\")",
+            "        self._adb('shell', f\"input text '{escaped}'\")",
             '    ',
             '    def press_key(self, key_code):',
             '        """Press a key code."""',
             '        key_map = {',
-            '            "ENTER": "66",',
-            '            "BACK": "4",',
-            '            "HOME": "3",',
-            '            "MENU": "1",',
-            '            "POWER": "26",',
-            '            "VOLUME_UP": "24",',
-            '            "VOLUME_DOWN": "25",',
+            '            "ENTER": "66", "BACK": "4", "HOME": "3", "MENU": "1",',
+            '            "POWER": "26", "VOLUME_UP": "24", "VOLUME_DOWN": "25",',
             '        }',
             '        code = key_map.get(key_code.upper(), key_code)',
-            '        cmd = f"adb -s {self.device_id} shell input keyevent {code}"',
-            '        subprocess.run(cmd, shell=True)',
+            '        self._adb("shell", f"input keyevent {code}")',
             '    ',
             '    def open_notification(self):',
             '        """Open notification bar."""',
-            '        cmd = f"adb -s {self.device_id} shell cmd statusbar expand-notifications"',
-            '        subprocess.run(cmd, shell=True)',
+            '        self._adb("shell", "cmd statusbar expand-notifications")',
             '    ',
-            '    def get_current_app(self):',
+            '    def get_current_app(self) -> str:',
             '        """Returns current foreground package name via ADB."""',
-            '        cmd = f"adb -s {self.device_id} shell dumpsys activity activities | grep mCurrentFocus"',
-            '        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)',
-            '        return result.stdout.strip()',
+            '        output = self._adb("shell", "dumpsys activity activities")',
+            '        for line in output.splitlines():',
+            '            if "mCurrentFocus" in line or "mFocusedApp" in line:',
+            '                return line',
+            '        return ""',
             '    ',
-            '    def screenshot(self, path):',
+            '    def get_current_activity(self) -> str:',
+            '        """Returns current foreground activity (package/activity) via ADB."""',
+            '        output = self._adb("shell", "dumpsys activity activities")',
+            '        for line in output.splitlines():',
+            '            if "mCurrentFocus" in line or "mFocusedApp" in line:',
+            '                match = re.search(r"(\\S+/\\S+)\\}", line)',
+            '                if match:',
+            '                    return match.group(1)',
+            '        return ""',
+            '    ',
+            '    def has_text_on_screen(self, text: str) -> bool:',
+            '        """Check if text exists in current UI hierarchy."""',
+            '        output = self._adb("exec-out", "uiautomator dump /dev/tty")',
+            '        return text in output',
+            '    ',
+            '    def screenshot(self, path: str):',
             '        """Capture screenshot via ADB screencap."""',
-            '        cmd = f"adb -s {self.device_id} exec-out screencap -p"',
-            '        result = subprocess.run(cmd, shell=True, capture_output=True)',
+            '        data = subprocess.run(',
+            '            ["adb", "-s", self.device_id, "exec-out", "screencap", "-p"],',
+            '            capture_output=True, timeout=10',
+            '        )',
             '        with open(path, "wb") as f:',
-            '            f.write(result.stdout)',
+            '            f.write(data.stdout)',
             '    ',
             '',
             '',
@@ -539,36 +633,50 @@ class TestRecorder:
         ]
 
         test_indent = "            "
-        for i, action in enumerate(self.actions, 1):
-            if i > 1:
-                prev_action = self.actions[i-2]
+        for i, action in enumerate(self.actions):
+            action_num = i + 1
+
+            # Delay between actions
+            if i > 0:
+                prev_action = self.actions[i - 1]
                 time_diff = action.timestamp - prev_action.timestamp
                 sleep_secs, delay_comment = self._normalize_delay(time_diff)
                 if sleep_secs > 0:
                     comment = f"  # {delay_comment}" if delay_comment else ""
                     script_lines.append(f"{test_indent}time.sleep({sleep_secs:.1f}){comment}")
 
-            # Generate action code with deeper indent for pytest
-            action_code = self._generate_action_code_adb(action, i)
-            # Re-indent from 4 spaces to 12 spaces (test method body inside try)
-            reindented = action_code.replace("    ", test_indent, 1)
-            # Handle multi-line actions
-            lines = reindented.split('\n')
-            result_lines = []
-            for j, line in enumerate(lines):
-                if j == 0:
-                    result_lines.append(line)
+            # Generate action code and re-indent from 4 to 12 spaces
+            action_code = self._generate_action_code_adb(action, action_num)
+            reindented_lines = []
+            for j, line in enumerate(action_code.split('\n')):
+                if line.startswith("    "):
+                    reindented_lines.append(test_indent + line[4:])
                 else:
-                    # Replace leading 4-space indent with test indent
-                    if line.startswith("    "):
-                        result_lines.append(test_indent + line[4:])
-                    else:
-                        result_lines.append(line)
-            script_lines.append('\n'.join(result_lines))
+                    reindented_lines.append(line)
+            script_lines.append('\n'.join(reindented_lines))
+
+            # Insert assertions after this action
+            if i in assertions:
+                assertion_code = self._generate_assertion_code(assertions[i], test_indent)
+                script_lines.append(assertion_code)
+
+        # Final assertion: verify app is still alive at end of test
+        last_app = ""
+        for action in reversed(self.actions):
+            if action.screen_app:
+                last_app = action.screen_app
+                break
+        if last_app:
+            script_lines.append(f'{test_indent}')
+            script_lines.append(f'{test_indent}# Final verification: app is still running')
+            script_lines.append(
+                f'{test_indent}assert "{last_app}" in device.get_current_app(), '
+                f'"App {last_app} should still be in foreground at end of test"'
+            )
 
         script_lines.extend([
             '        except Exception as e:',
-            '            # Screenshot on failure',
+            '            # Screenshot on failure for debugging',
             '            device.screenshot(f"failure_{request.node.name}.png")',
             '            raise',
         ])
