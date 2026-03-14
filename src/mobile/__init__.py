@@ -130,7 +130,9 @@ class Mobile:
                     self._last_device_context = device_context
 
                     if use_vision:
-                        self._ensure_connected()  # Need device for screenshot
+                        # Do NOT call _ensure_connected() here — it starts uiautomator2's
+                        # accessibility service which disconnects the DroidRun Portal.
+                        # get_screenshot() uses ADB screencap directly, no u2 needed.
                         nodes = tree_state.interactive_elements
                         tree = Tree(self)
                         annotated_screenshot = tree.annotated_screenshot(nodes=nodes, scale=1.0)
