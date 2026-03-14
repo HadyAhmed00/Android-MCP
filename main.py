@@ -56,6 +56,16 @@ if device_id is None:
 mobile=Mobile(device=device_id, use_mcp_helper=True)
 recorder=TestRecorder()
 
+def _get_screen_context() -> tuple:
+    """Read current app/activity from cached state without triggering a new fetch."""
+    try:
+        if mobile._state_cache and hasattr(mobile, '_last_device_context') and mobile._last_device_context:
+            ctx = mobile._last_device_context
+            return (ctx.current_app, ctx.current_activity)
+    except Exception:
+        pass
+    return ("", "")
+
 # Helper function to execute ADB commands without using uiautomator2's accessibility service
 def adb_shell(command: str) -> str:
     """Execute ADB shell command using the configured device."""
@@ -72,7 +82,9 @@ def adb_shell(command: str) -> str:
 def click_tool(x:int,y:int):
     # Use ADB input tap instead of uiautomator2 to avoid accessibility service conflict
     adb_shell(f"input tap {x} {y}")
-    recorder.record_action('click', {'x': x, 'y': y}, result=f'Clicked on ({x},{y})')
+    app, activity = _get_screen_context()
+    recorder.record_action('click', {'x': x, 'y': y}, result=f'Clicked on ({x},{y})',
+                           screen_app=app, screen_activity=activity)
     return f'Clicked on ({x},{y})'
 
 @mcp.tool('State-Tool',description='Get current screen state: interactive UI elements with label indices, types, names, and tap coordinates. Returns device context (current app, keyboard visibility, screen size). Set use_vision=True for annotated screenshot. Always call this first before interacting.')
@@ -98,21 +110,31 @@ def click_by_label(label:int):
     element = elements[label]
     x, y = element.coordinates.x, element.coordinates.y
     adb_shell(f"input tap {x} {y}")
-    recorder.record_action('click_by_label', {'label': label, 'name': element.name, 'x': x, 'y': y}, result=f'Clicked on label {label} ("{element.name}") at ({x},{y})')
+    app, activity = _get_screen_context()
+    etype = getattr(element, 'element_type', '')
+    recorder.record_action('click_by_label', {'label': label, 'name': element.name, 'x': x, 'y': y},
+                           result=f'Clicked on label {label} ("{element.name}") at ({x},{y})',
+                           element_name=element.name, element_type=etype,
+                           screen_app=app, screen_activity=activity)
     return f'Clicked on label {label} ("{element.name}") at ({x},{y})'
 
 @mcp.tool(name='Long-Click-Tool',description='Long-press at (x,y) for ~1 second. Use for context menus or elements requiring sustained touch.')
 def long_click_tool(x:int,y:int):
     # Use ADB input swipe with long duration to simulate long click
     adb_shell(f"input swipe {x} {y} {x} {y} 1000")
-    recorder.record_action('long_click', {'x': x, 'y': y}, result=f'Long Clicked on ({x},{y})')
+    app, activity = _get_screen_context()
+    recorder.record_action('long_click', {'x': x, 'y': y}, result=f'Long Clicked on ({x},{y})',
+                           screen_app=app, screen_activity=activity)
     return f'Long Clicked on ({x},{y})'
 
 @mcp.tool(name='Swipe-Tool',description='Swipe from (x1,y1) to (x2,y2) over 300ms. To scroll DOWN, swipe from bottom to top. To scroll UP, swipe from top to bottom.')
 def swipe_tool(x1:int,y1:int,x2:int,y2:int):
     # Use ADB input swipe
     adb_shell(f"input swipe {x1} {y1} {x2} {y2} 300")
-    recorder.record_action('swipe', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2}, result=f'Swiped from ({x1},{y1}) to ({x2},{y2})')
+    app, activity = _get_screen_context()
+    recorder.record_action('swipe', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2},
+                           result=f'Swiped from ({x1},{y1}) to ({x2},{y2})',
+                           screen_app=app, screen_activity=activity)
     return f'Swiped from ({x1},{y1}) to ({x2},{y2})'
 
 @mcp.tool(name='Type-Tool',description='Tap (x,y) to focus the input field, then type the given text. Only use on input/editable elements.')
@@ -123,14 +145,31 @@ def type_tool(text:str,x:int,y:int,clear:bool=False):
     # Note: Special characters may need escaping
     escaped_text = text.replace(' ', '%s').replace("'", "\\'")
     adb_shell(f"input text '{escaped_text}'")
-    recorder.record_action('type', {'text': text, 'x': x, 'y': y, 'clear': clear}, result=f'Typed "{text}" on ({x},{y})')
+    app, activity = _get_screen_context()
+    # Try to look up element name from state cache
+    elem_name = ""
+    try:
+        if mobile._state_cache:
+            for el in mobile._state_cache.interactive_elements:
+                if el.coordinates and el.coordinates.x == x and el.coordinates.y == y:
+                    elem_name = el.name
+                    break
+    except Exception:
+        pass
+    recorder.record_action('type', {'text': text, 'x': x, 'y': y, 'clear': clear},
+                           result=f'Typed "{text}" on ({x},{y})',
+                           element_name=elem_name, element_type="input",
+                           screen_app=app, screen_activity=activity)
     return f'Typed "{text}" on ({x},{y})'
 
 @mcp.tool(name='Drag-Tool',description='Drag from (x1,y1) to (x2,y2) over 500ms. Use for reordering, moving items, or adjusting sliders.')
 def drag_tool(x1:int,y1:int,x2:int,y2:int):
     # Use ADB input swipe with longer duration for drag
     adb_shell(f"input swipe {x1} {y1} {x2} {y2} 500")
-    recorder.record_action('drag', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2}, result=f'Dragged from ({x1},{y1}) and dropped on ({x2},{y2})')
+    app, activity = _get_screen_context()
+    recorder.record_action('drag', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2},
+                           result=f'Dragged from ({x1},{y1}) and dropped on ({x2},{y2})',
+                           screen_app=app, screen_activity=activity)
     return f'Dragged from ({x1},{y1}) and dropped on ({x2},{y2})'
 
 @mcp.tool(name='Press-Tool',description='Press a device button: home, back, menu, power, volume_up, volume_down, enter, delete. Also accepts raw Android KEYCODE strings.')
@@ -148,21 +187,27 @@ def press_tool(button:str):
     }
     keycode = keycode_map.get(button.lower(), button)
     adb_shell(f"input keyevent {keycode}")
-    recorder.record_action('press', {'button': button}, result=f'Pressed the "{button}" button')
+    app, activity = _get_screen_context()
+    recorder.record_action('press', {'button': button}, result=f'Pressed the "{button}" button',
+                           screen_app=app, screen_activity=activity)
     return f'Pressed the "{button}" button'
 
 @mcp.tool(name='Notification-Tool',description='Access the notifications seen on the device')
 def notification_tool():
     # Open notification panel by swiping down from top or using service call
     adb_shell("cmd statusbar expand-notifications")
-    recorder.record_action('notification', {}, result='Accessed notification bar')
+    app, activity = _get_screen_context()
+    recorder.record_action('notification', {}, result='Accessed notification bar',
+                           screen_app=app, screen_activity=activity)
     return 'Accessed notification bar'
 
 @mcp.tool(name='Wait-Tool',description='Wait for a specific amount of time')
 def wait_tool(duration:int):
     # Use Python's time.sleep instead of uiautomator2 to avoid accessibility service conflict
     time.sleep(duration)
-    recorder.record_action('wait', {'duration': duration}, result=f'Waited for {duration} seconds')
+    app, activity = _get_screen_context()
+    recorder.record_action('wait', {'duration': duration}, result=f'Waited for {duration} seconds',
+                           screen_app=app, screen_activity=activity)
     return f'Waited for {duration} seconds'
 
 @mcp.tool(name='Start-Recording-Tool',description='Start recording test actions')
@@ -175,15 +220,15 @@ def stop_recording_tool():
     recorder.stop()
     return f'Test recording stopped. {len(recorder.get_actions())} actions recorded.'
 
-@mcp.tool(name='Export-Test-Script',description='Export recorded test actions as executable test script. Supported formats: python, json, readable')
+@mcp.tool(name='Export-Test-Script',description='Export recorded test actions as executable test script. Supported formats: python, pytest, json, readable')
 def export_test_script(format:str='python',filename:str=None,test_name:str=None)->str:
     """
     Export recorded test actions.
 
     Parameters:
-    - format: 'python' (executable Python script), 'json' (JSON data), 'readable' (human-readable steps)
+    - format: 'python' (executable Python script), 'pytest' (pytest-compatible test), 'json' (JSON data), 'readable' (human-readable steps)
     - filename: Optional custom filename (without extension)
-    - test_name: Optional custom test name for Python exports
+    - test_name: Optional custom test name for Python/pytest exports
     """
     try:
         if not recorder.get_actions():
@@ -193,18 +238,37 @@ def export_test_script(format:str='python',filename:str=None,test_name:str=None)
 
         if format == 'python':
             filepath = recorder.export_as_python(filename=filename, test_name=test_name)
-            return f'Test script exported as Python: {filepath}\n\nYou can now run this script directly with: python {filepath}'
+            msg = f'Test script exported as Python: {filepath}\n\nYou can now run this script directly with: python {filepath}'
+
+        elif format == 'pytest':
+            filepath = recorder.export_as_pytest(filename=filename, test_name=test_name)
+            msg = f'Test script exported as pytest: {filepath}\n\nRun with: pytest {filepath} -v'
 
         elif format == 'json':
             filepath = recorder.export_as_json(filename=filename)
-            return f'Test data exported as JSON: {filepath}'
+            msg = f'Test data exported as JSON: {filepath}'
 
         elif format == 'readable':
             filepath = recorder.export_as_readable(filename=filename)
-            return f'Test steps exported as readable format: {filepath}'
+            msg = f'Test steps exported as readable format: {filepath}'
 
         else:
-            return f'Unknown format: {format}. Supported formats: python, json, readable'
+            return f'Unknown format: {format}. Supported formats: python, pytest, json, readable'
+
+        # Append file content preview (first 20 lines)
+        try:
+            with open(filepath, 'r') as f:
+                preview_lines = []
+                for i, line in enumerate(f):
+                    if i >= 20:
+                        preview_lines.append("...")
+                        break
+                    preview_lines.append(line.rstrip())
+            msg += f'\n\n--- Preview ---\n' + '\n'.join(preview_lines)
+        except Exception:
+            pass
+
+        return msg
 
     except Exception as e:
         return f'Error exporting test script: {str(e)}'
