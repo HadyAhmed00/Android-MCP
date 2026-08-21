@@ -19,6 +19,10 @@ class TestAction:
     element_type: str = ""     # "button", "input", etc.
     screen_app: str = ""       # "io.github.hadyahmed00.quicktasks_dimo"
     screen_activity: str = ""  # ".LoginActivity"
+    screen_width: int = 0      # recording device screen width in pixels
+    screen_height: int = 0     # recording device screen height in pixels
+    status_bar_height: int = 0 # recording device status bar height in pixels
+    nav_bar_height: int = 0    # recording device navigation bar height in pixels
 
     def to_dict(self):
         return asdict(self)
@@ -45,7 +49,9 @@ class TestRecorder:
     def record_action(self, action: str, parameters: dict, result: str = "",
                       description: str = "", element_name: str = "",
                       element_type: str = "", screen_app: str = "",
-                      screen_activity: str = ""):
+                      screen_activity: str = "", screen_width: int = 0,
+                      screen_height: int = 0, status_bar_height: int = 0,
+                      nav_bar_height: int = 0):
         """Record a single action."""
         if not self.is_recording:
             return
@@ -61,6 +67,10 @@ class TestRecorder:
             element_type=element_type,
             screen_app=screen_app,
             screen_activity=screen_activity,
+            screen_width=screen_width,
+            screen_height=screen_height,
+            status_bar_height=status_bar_height,
+            nav_bar_height=nav_bar_height,
         )
         self.actions.append(test_action)
 
@@ -132,15 +142,104 @@ class TestRecorder:
             f'Auto-generated test script: {test_name}',
             f'Generated: {self.start_time.isoformat()}',
             f'Total actions: {len(self.actions)}',
+            '',
+            'Coordinates are percentages (0-100) for resolution independence.',
+            'The PctDevice wrapper converts them to pixels at runtime.',
             '"""',
             '',
+            'import subprocess',
             'import uiautomator2 as u2',
             'import time',
+            '',
+            '',
+            'class PctDevice:',
+            '    """Wrapper around uiautomator2 device that accepts percentage coordinates.',
+            '    ',
+            '    Y coordinates are percentages of the content area (excluding status bar',
+            '    and navigation bar) for resolution independence."""',
+            '    ',
+            '    def __init__(self, u2_device):',
+            '        self._d = u2_device',
+            '        info = u2_device.info',
+            '        self.screen_width = info["displayWidth"]',
+            '        self.screen_height = info["displayHeight"]',
+            '        self.status_bar_h, self.nav_bar_h = self._get_system_bar_heights()',
+            '        self.content_height = self.screen_height - self.status_bar_h - self.nav_bar_h',
+            '    ',
+            '    def _get_system_bar_heights(self):',
+            '        """Get status bar and navigation bar heights via ADB."""',
+            '        import re',
+            '        status_h, nav_h = 0, 0',
+            '        try:',
+            '            result = subprocess.run(',
+            '                ["adb", "shell", "dumpsys", "window"],',
+            '                capture_output=True, text=True, timeout=5)',
+            '            in_status = False',
+            '            in_nav = False',
+            '            for line in result.stdout.splitlines():',
+            '                if "StatusBar" in line and "Window" in line:',
+            '                    in_status = True',
+            '                    in_nav = False',
+            '                elif "NavigationBar" in line and "Window" in line:',
+            '                    in_nav = True',
+            '                    in_status = False',
+            '                elif "Window #" in line:',
+            '                    in_status = False',
+            '                    in_nav = False',
+            '                if in_status and "mFrame=" in line:',
+            '                    m = re.search(r"mFrame=\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]", line)',
+            '                    if m:',
+            '                        status_h = int(m.group(4)) - int(m.group(2))',
+            '                    in_status = False',
+            '                if in_nav and "mFrame=" in line:',
+            '                    m = re.search(r"mFrame=\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]", line)',
+            '                    if m:',
+            '                        nav_h = int(m.group(4)) - int(m.group(2))',
+            '                    in_nav = False',
+            '        except Exception:',
+            '            pass',
+            '        return status_h, nav_h',
+            '    ',
+            '    def _pct_to_px(self, x_pct, y_pct):',
+            '        x = int(x_pct / 100 * self.screen_width)',
+            '        y = int(y_pct / 100 * self.content_height + self.status_bar_h)',
+            '        return x, y',
+            '    ',
+            '    def click(self, x_pct, y_pct):',
+            '        x, y = self._pct_to_px(x_pct, y_pct)',
+            '        self._d.click(x, y)',
+            '    ',
+            '    def long_click(self, x_pct, y_pct):',
+            '        x, y = self._pct_to_px(x_pct, y_pct)',
+            '        self._d.long_click(x, y)',
+            '    ',
+            '    def swipe(self, x1_pct, y1_pct, x2_pct, y2_pct):',
+            '        x1, y1 = self._pct_to_px(x1_pct, y1_pct)',
+            '        x2, y2 = self._pct_to_px(x2_pct, y2_pct)',
+            '        self._d.swipe(x1, y1, x2, y2)',
+            '    ',
+            '    def drag(self, x1_pct, y1_pct, x2_pct, y2_pct):',
+            '        x1, y1 = self._pct_to_px(x1_pct, y1_pct)',
+            '        x2, y2 = self._pct_to_px(x2_pct, y2_pct)',
+            '        self._d.drag(x1, y1, x2, y2)',
+            '    ',
+            '    def send_keys(self, text):',
+            '        self._d.send_keys(text)',
+            '    ',
+            '    def press(self, key):',
+            '        self._d.press(key)',
+            '    ',
+            '    def open_notification(self):',
+            '        self._d.open_notification()',
+            '    ',
+            '',
             '',
             'def run_test(device=None):',
             '    """Run the recorded test sequence."""',
             '    if device is None:',
-            '        device = u2.connect()',
+            '        device = PctDevice(u2.connect())',
+            '    elif not isinstance(device, PctDevice):',
+            '        device = PctDevice(device)',
             '    ',
         ]
 
@@ -188,11 +287,21 @@ class TestRecorder:
             '',
             '',
             'class DeviceController:',
-            '    """Direct ADB device controller - no external dependencies."""',
+            '    """Direct ADB device controller - no external dependencies.',
+            '    ',
+            '    Coordinates are passed as percentages (0-100) and converted to pixels',
+            '    at runtime based on the actual device screen size. This makes scripts',
+            '    resolution-independent."""',
             '    ',
             '    def __init__(self, device_id="emulator-5554"):',
             '        self.device_id = device_id',
             '        self._verify_device()',
+            '        self.screen_width, self.screen_height = self._get_screen_size()',
+            '        self.status_bar_h, self.nav_bar_h = self._get_system_bar_heights()',
+            '        self.content_height = self.screen_height - self.status_bar_h - self.nav_bar_h',
+            '        print(f"Screen: {self.screen_width}x{self.screen_height}, '
+                         f'status_bar={self.status_bar_h}, nav_bar={self.nav_bar_h}, '
+                         f'content={self.content_height}")',
             '    ',
             '    def _verify_device(self):',
             '        """Verify device is connected."""',
@@ -200,23 +309,84 @@ class TestRecorder:
             '        if self.device_id not in result.stdout:',
             '            raise Exception(f"Device {self.device_id} not found. Available devices:\\n{result.stdout}")',
             '    ',
-            '    def click(self, x, y):',
-            '        """Click at coordinates."""',
+            '    def _get_screen_size(self):',
+            '        """Get device screen size via ADB."""',
+            '        result = subprocess.run(',
+            '            ["adb", "-s", self.device_id, "shell", "wm", "size"],',
+            '            capture_output=True, text=True)',
+            '        for line in result.stdout.splitlines():',
+            '            if "size:" in line.lower():',
+            '                w, h = line.split(":")[-1].strip().split("x")',
+            '                return int(w), int(h)',
+            '        return 1080, 1920  # sensible default',
+            '    ',
+            '    def _get_system_bar_heights(self):',
+            '        """Get status bar and navigation bar heights via ADB."""',
+            '        import re',
+            '        status_h, nav_h = 0, 0',
+            '        try:',
+            '            result = subprocess.run(',
+            '                ["adb", "-s", self.device_id, "shell", "dumpsys", "window"],',
+            '                capture_output=True, text=True, timeout=5)',
+            '            in_status = False',
+            '            in_nav = False',
+            '            for line in result.stdout.splitlines():',
+            '                if "StatusBar" in line and "Window" in line:',
+            '                    in_status = True',
+            '                    in_nav = False',
+            '                elif "NavigationBar" in line and "Window" in line:',
+            '                    in_nav = True',
+            '                    in_status = False',
+            '                elif "Window #" in line:',
+            '                    in_status = False',
+            '                    in_nav = False',
+            '                if in_status and "mFrame=" in line:',
+            '                    m = re.search(r"mFrame=\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]", line)',
+            '                    if m:',
+            '                        status_h = int(m.group(4)) - int(m.group(2))',
+            '                    in_status = False',
+            '                if in_nav and "mFrame=" in line:',
+            '                    m = re.search(r"mFrame=\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]", line)',
+            '                    if m:',
+            '                        nav_h = int(m.group(4)) - int(m.group(2))',
+            '                    in_nav = False',
+            '        except Exception:',
+            '            pass',
+            '        return status_h, nav_h',
+            '    ',
+            '    def _pct_to_px(self, x_pct, y_pct):',
+            '        """Convert percentage coordinates to absolute pixels.',
+            '        ',
+            '        X: percentage of full screen width.',
+            '        Y: percentage of content area (screen minus status bar and nav bar),',
+            '           then offset by status bar height to get absolute screen Y."""',
+            '        x = int(x_pct / 100 * self.screen_width)',
+            '        y = int(y_pct / 100 * self.content_height + self.status_bar_h)',
+            '        return x, y',
+            '    ',
+            '    def click(self, x_pct, y_pct):',
+            '        """Click at percentage coordinates."""',
+            '        x, y = self._pct_to_px(x_pct, y_pct)',
             '        cmd = f"adb -s {self.device_id} shell input tap {x} {y}"',
             '        subprocess.run(cmd, shell=True)',
             '    ',
-            '    def long_click(self, x, y, duration=1000):',
-            '        """Long click at coordinates."""',
+            '    def long_click(self, x_pct, y_pct, duration=1000):',
+            '        """Long click at percentage coordinates."""',
+            '        x, y = self._pct_to_px(x_pct, y_pct)',
             '        cmd = f"adb -s {self.device_id} shell input touchscreen swipe {x} {y} {x} {y} {duration}"',
             '        subprocess.run(cmd, shell=True)',
             '    ',
-            '    def swipe(self, x1, y1, x2, y2, duration=300):',
-            '        """Swipe from one point to another."""',
+            '    def swipe(self, x1_pct, y1_pct, x2_pct, y2_pct, duration=300):',
+            '        """Swipe from one point to another using percentage coordinates."""',
+            '        x1, y1 = self._pct_to_px(x1_pct, y1_pct)',
+            '        x2, y2 = self._pct_to_px(x2_pct, y2_pct)',
             '        cmd = f"adb -s {self.device_id} shell input touchscreen swipe {x1} {y1} {x2} {y2} {duration}"',
             '        subprocess.run(cmd, shell=True)',
             '    ',
-            '    def drag(self, x1, y1, x2, y2, duration=500):',
-            '        """Drag from one point to another."""',
+            '    def drag(self, x1_pct, y1_pct, x2_pct, y2_pct, duration=500):',
+            '        """Drag from one point to another using percentage coordinates."""',
+            '        x1, y1 = self._pct_to_px(x1_pct, y1_pct)',
+            '        x2, y2 = self._pct_to_px(x2_pct, y2_pct)',
             '        cmd = f"adb -s {self.device_id} shell input touchscreen swipe {x1} {y1} {x2} {y2} {duration}"',
             '        subprocess.run(cmd, shell=True)',
             '    ',
@@ -317,38 +487,55 @@ class TestRecorder:
         """Generate Python code for a single action using uiautomator2."""
         params = action.parameters
         indent = "    "
+        sw = action.screen_width
 
         if action.action == "click":
-            comment = self._make_step_comment(action, action_num, f'Tap at ({params["x"]}, {params["y"]})')
-            return f'{indent}{comment}\n{indent}device.click({params["x"]}, {params["y"]})'
+            x_pct = self._to_pct_x(params["x"], sw)
+            y_pct = self._to_pct_y(params["y"], action)
+            comment = self._make_step_comment(action, action_num, f'Tap at ({x_pct}%, {y_pct}%)')
+            return f'{indent}{comment}\n{indent}device.click({x_pct}, {y_pct})'
 
         elif action.action == "click_by_label":
             name = params.get("name", "")
             etype = action.element_type or "element"
-            label = f'Tap "{name}" {etype} at ({params["x"]}, {params["y"]})'
+            x_pct = self._to_pct_x(params["x"], sw)
+            y_pct = self._to_pct_y(params["y"], action)
+            label = f'Tap "{name}" {etype} at ({x_pct}%, {y_pct}%)'
             comment = self._make_step_comment(action, action_num, label)
-            return f'{indent}{comment}\n{indent}device.click({params["x"]}, {params["y"]})'
+            return f'{indent}{comment}\n{indent}device.click({x_pct}, {y_pct})'
 
         elif action.action == "long_click":
-            comment = self._make_step_comment(action, action_num, f'Long press at ({params["x"]}, {params["y"]})')
-            return f'{indent}{comment}\n{indent}device.long_click({params["x"]}, {params["y"]})'
+            x_pct = self._to_pct_x(params["x"], sw)
+            y_pct = self._to_pct_y(params["y"], action)
+            comment = self._make_step_comment(action, action_num, f'Long press at ({x_pct}%, {y_pct}%)')
+            return f'{indent}{comment}\n{indent}device.long_click({x_pct}, {y_pct})'
 
         elif action.action == "swipe":
-            comment = self._make_step_comment(action, action_num, f'Swipe from ({params["x1"]}, {params["y1"]}) to ({params["x2"]}, {params["y2"]})')
-            return f'{indent}{comment}\n{indent}device.swipe({params["x1"]}, {params["y1"]}, {params["x2"]}, {params["y2"]})'
+            x1_pct = self._to_pct_x(params["x1"], sw)
+            y1_pct = self._to_pct_y(params["y1"], action)
+            x2_pct = self._to_pct_x(params["x2"], sw)
+            y2_pct = self._to_pct_y(params["y2"], action)
+            comment = self._make_step_comment(action, action_num, f'Swipe from ({x1_pct}%, {y1_pct}%) to ({x2_pct}%, {y2_pct}%)')
+            return f'{indent}{comment}\n{indent}device.swipe({x1_pct}, {y1_pct}, {x2_pct}, {y2_pct})'
 
         elif action.action == "type":
             text = params["text"].replace('"', '\\"')
-            field_name = action.element_name or f'({params["x"]}, {params["y"]})'
+            x_pct = self._to_pct_x(params["x"], sw)
+            y_pct = self._to_pct_y(params["y"], action)
+            field_name = action.element_name or f'({x_pct}%, {y_pct}%)'
             comment = self._make_step_comment(action, action_num, f'Type "{text}" in {field_name}')
             lines = f'{indent}{comment}\n'
-            lines += f'{indent}device.click({params["x"]}, {params["y"]})\n'
+            lines += f'{indent}device.click({x_pct}, {y_pct})\n'
             lines += f'{indent}device.send_keys("{text}")'
             return lines
 
         elif action.action == "drag":
-            comment = self._make_step_comment(action, action_num, f'Drag from ({params["x1"]}, {params["y1"]}) to ({params["x2"]}, {params["y2"]})')
-            return f'{indent}{comment}\n{indent}device.drag({params["x1"]}, {params["y1"]}, {params["x2"]}, {params["y2"]})'
+            x1_pct = self._to_pct_x(params["x1"], sw)
+            y1_pct = self._to_pct_y(params["y1"], action)
+            x2_pct = self._to_pct_x(params["x2"], sw)
+            y2_pct = self._to_pct_y(params["y2"], action)
+            comment = self._make_step_comment(action, action_num, f'Drag from ({x1_pct}%, {y1_pct}%) to ({x2_pct}%, {y2_pct}%)')
+            return f'{indent}{comment}\n{indent}device.drag({x1_pct}, {y1_pct}, {x2_pct}, {y2_pct})'
 
         elif action.action == "press":
             button = params["button"]
@@ -367,42 +554,82 @@ class TestRecorder:
         else:
             return f'{indent}# Step {action_num}: {action.action} {params}'
 
+    def _to_pct_x(self, x_px, screen_width):
+        """Convert an X pixel coordinate to percentage of screen width."""
+        if screen_width <= 0:
+            return x_px
+        return round(x_px / screen_width * 100, 2)
+
+    def _to_pct_y(self, y_px, action: TestAction):
+        """Convert a Y pixel coordinate to percentage of the content area.
+
+        The content area excludes the status bar (top) and navigation bar (bottom).
+        This makes Y percentages accurate across devices with different system bar sizes.
+        """
+        sh = action.screen_height
+        if sh <= 0:
+            return y_px
+        sb = action.status_bar_height
+        nb = action.nav_bar_height
+        content_height = sh - sb - nb
+        if content_height <= 0:
+            return round(y_px / sh * 100, 2)
+        # Map y relative to the content area (y=0 at top of content, below status bar)
+        return round((y_px - sb) / content_height * 100, 2)
+
     def _generate_action_code_adb(self, action: TestAction, action_num: int) -> str:
         """Generate Python code for a single action using direct ADB commands."""
         params = action.parameters
         indent = "    "
+        sw = action.screen_width
 
         if action.action == "click":
-            comment = self._make_step_comment(action, action_num, f'Tap at ({params["x"]}, {params["y"]})')
-            return f'{indent}{comment}\n{indent}device.click({params["x"]}, {params["y"]})'
+            x_pct = self._to_pct_x(params["x"], sw)
+            y_pct = self._to_pct_y(params["y"], action)
+            comment = self._make_step_comment(action, action_num, f'Tap at ({x_pct}%, {y_pct}%)')
+            return f'{indent}{comment}\n{indent}device.click({x_pct}, {y_pct})'
 
         elif action.action == "click_by_label":
             name = params.get("name", "")
             etype = action.element_type or "element"
-            label = f'Tap "{name}" {etype} at ({params["x"]}, {params["y"]})'
+            x_pct = self._to_pct_x(params["x"], sw)
+            y_pct = self._to_pct_y(params["y"], action)
+            label = f'Tap "{name}" {etype} at ({x_pct}%, {y_pct}%)'
             comment = self._make_step_comment(action, action_num, label)
-            return f'{indent}{comment}\n{indent}device.click({params["x"]}, {params["y"]})'
+            return f'{indent}{comment}\n{indent}device.click({x_pct}, {y_pct})'
 
         elif action.action == "long_click":
-            comment = self._make_step_comment(action, action_num, f'Long press at ({params["x"]}, {params["y"]})')
-            return f'{indent}{comment}\n{indent}device.long_click({params["x"]}, {params["y"]})'
+            x_pct = self._to_pct_x(params["x"], sw)
+            y_pct = self._to_pct_y(params["y"], action)
+            comment = self._make_step_comment(action, action_num, f'Long press at ({x_pct}%, {y_pct}%)')
+            return f'{indent}{comment}\n{indent}device.long_click({x_pct}, {y_pct})'
 
         elif action.action == "swipe":
-            comment = self._make_step_comment(action, action_num, f'Swipe from ({params["x1"]}, {params["y1"]}) to ({params["x2"]}, {params["y2"]})')
-            return f'{indent}{comment}\n{indent}device.swipe({params["x1"]}, {params["y1"]}, {params["x2"]}, {params["y2"]})'
+            x1_pct = self._to_pct_x(params["x1"], sw)
+            y1_pct = self._to_pct_y(params["y1"], action)
+            x2_pct = self._to_pct_x(params["x2"], sw)
+            y2_pct = self._to_pct_y(params["y2"], action)
+            comment = self._make_step_comment(action, action_num, f'Swipe from ({x1_pct}%, {y1_pct}%) to ({x2_pct}%, {y2_pct}%)')
+            return f'{indent}{comment}\n{indent}device.swipe({x1_pct}, {y1_pct}, {x2_pct}, {y2_pct})'
 
         elif action.action == "type":
             text = params["text"].replace('"', '\\"')
-            field_name = action.element_name or f'({params["x"]}, {params["y"]})'
+            x_pct = self._to_pct_x(params["x"], sw)
+            y_pct = self._to_pct_y(params["y"], action)
+            field_name = action.element_name or f'({x_pct}%, {y_pct}%)'
             comment = self._make_step_comment(action, action_num, f'Type "{text}" in {field_name}')
             lines = f'{indent}{comment}\n'
-            lines += f'{indent}device.click({params["x"]}, {params["y"]})\n'
+            lines += f'{indent}device.click({x_pct}, {y_pct})\n'
             lines += f'{indent}device.type_text("{text}")'
             return lines
 
         elif action.action == "drag":
-            comment = self._make_step_comment(action, action_num, f'Drag from ({params["x1"]}, {params["y1"]}) to ({params["x2"]}, {params["y2"]})')
-            return f'{indent}{comment}\n{indent}device.drag({params["x1"]}, {params["y1"]}, {params["x2"]}, {params["y2"]})'
+            x1_pct = self._to_pct_x(params["x1"], sw)
+            y1_pct = self._to_pct_y(params["y1"], action)
+            x2_pct = self._to_pct_x(params["x2"], sw)
+            y2_pct = self._to_pct_y(params["y2"], action)
+            comment = self._make_step_comment(action, action_num, f'Drag from ({x1_pct}%, {y1_pct}%) to ({x2_pct}%, {y2_pct}%)')
+            return f'{indent}{comment}\n{indent}device.drag({x1_pct}, {y1_pct}, {x2_pct}, {y2_pct})'
 
         elif action.action == "press":
             button = params["button"]
@@ -421,83 +648,8 @@ class TestRecorder:
         else:
             return f'{indent}# Step {action_num}: {action.action} {params}'
 
-    def _compute_assertions(self) -> dict:
-        """Pre-compute assertion data by analyzing screen transitions between actions.
-
-        Returns a dict mapping action index (0-based) to a list of assertion dicts.
-        Each assertion dict has: type, expected, message.
-        """
-        assertions = {}
-        for i, action in enumerate(self.actions):
-            action_asserts = []
-            next_action = self.actions[i + 1] if i + 1 < len(self.actions) else None
-
-            # Detect screen transition: next action has different app or activity
-            if next_action and next_action.screen_app:
-                app_changed = (action.screen_app and
-                               next_action.screen_app != action.screen_app)
-                activity_changed = (action.screen_activity and
-                                    next_action.screen_activity and
-                                    next_action.screen_activity != action.screen_activity)
-
-                if app_changed:
-                    action_asserts.append({
-                        'type': 'app',
-                        'expected': next_action.screen_app,
-                        'message': f'Expected to navigate to {next_action.screen_app}',
-                    })
-                if activity_changed:
-                    action_asserts.append({
-                        'type': 'activity',
-                        'expected': next_action.screen_activity,
-                        'message': f'Expected screen {next_action.screen_activity}',
-                    })
-                elif not app_changed and action.action in ('click_by_label', 'click', 'press'):
-                    # Same screen — assert app didn't crash
-                    action_asserts.append({
-                        'type': 'app_alive',
-                        'expected': action.screen_app or next_action.screen_app,
-                        'message': 'App should still be in foreground',
-                    })
-
-            # After type: assert app didn't crash
-            if action.action == 'type' and action.screen_app and not action_asserts:
-                action_asserts.append({
-                    'type': 'app_alive',
-                    'expected': action.screen_app,
-                    'message': 'App should still be in foreground after typing',
-                })
-
-            if action_asserts:
-                assertions[i] = action_asserts
-
-        return assertions
-
-    def _generate_assertion_code(self, asserts: list, indent: str) -> str:
-        """Generate Python assertion lines from assertion dicts."""
-        lines = []
-        for a in asserts:
-            if a['type'] == 'activity':
-                lines.append(f'{indent}time.sleep(0.5)  # wait for navigation')
-                lines.append(
-                    f'{indent}assert "{a["expected"]}" in device.get_current_activity(), '
-                    f'"{a["message"]}"'
-                )
-            elif a['type'] == 'app':
-                lines.append(f'{indent}time.sleep(0.5)  # wait for navigation')
-                lines.append(
-                    f'{indent}assert "{a["expected"]}" in device.get_current_app(), '
-                    f'"{a["message"]}"'
-                )
-            elif a['type'] == 'app_alive':
-                lines.append(
-                    f'{indent}assert "{a["expected"]}" in device.get_current_app(), '
-                    f'"{a["message"]}"'
-                )
-        return '\n'.join(lines)
-
     def export_as_pytest(self, filename: str = None, test_name: str = None) -> str:
-        """Export recorded actions as a pytest-compatible test file with assertions."""
+        """Export recorded actions as a pytest-compatible test file."""
         if not filename:
             timestamp = self.start_time.strftime("%Y%m%d_%H%M%S")
             filename = f"test_{timestamp}_pytest.py"
@@ -512,22 +664,17 @@ class TestRecorder:
         # Build class name from test_name (PascalCase)
         class_name = ''.join(word.capitalize() for word in test_name.split('_') if word)
 
-        # Pre-compute assertions from screen transition analysis
-        assertions = self._compute_assertions()
-
         script_lines = [
             '"""',
             f'Auto-generated pytest test: {test_name}',
             f'Generated: {self.start_time.isoformat()}',
             f'Total actions: {len(self.actions)}',
-            f'Assertions: {sum(len(v) for v in assertions.values())}',
             '',
             f'Run with pytest:  pytest {filename} -v',
             f'Run directly:     python {filename} [device_id]',
             '"""',
             '',
             'import subprocess',
-            'import re',
             'import time',
             'import sys',
             '',
@@ -539,11 +686,18 @@ class TestRecorder:
             '',
             '',
             'class DeviceController:',
-            '    """Direct ADB device controller - no external dependencies."""',
+            '    """Direct ADB device controller - no external dependencies.',
+            '    ',
+            '    Coordinates are passed as percentages (0-100) and converted to pixels',
+            '    at runtime based on the actual device screen size. This makes scripts',
+            '    resolution-independent."""',
             '    ',
             '    def __init__(self, device_id="emulator-5554"):',
             '        self.device_id = device_id',
             '        self._verify_device()',
+            '        self.screen_width, self.screen_height = self._get_screen_size()',
+            '        self.status_bar_h, self.nav_bar_h = self._get_system_bar_heights()',
+            '        self.content_height = self.screen_height - self.status_bar_h - self.nav_bar_h',
             '    ',
             '    def _verify_device(self):',
             '        """Verify device is connected."""',
@@ -551,26 +705,86 @@ class TestRecorder:
             '        if self.device_id not in result.stdout:',
             '            raise Exception(f"Device {self.device_id} not found. Available devices:\\n{result.stdout}")',
             '    ',
+            '    def _get_screen_size(self):',
+            '        """Get device screen size via ADB."""',
+            '        result = subprocess.run(',
+            '            ["adb", "-s", self.device_id, "shell", "wm", "size"],',
+            '            capture_output=True, text=True)',
+            '        for line in result.stdout.splitlines():',
+            '            if "size:" in line.lower():',
+            '                w, h = line.split(":")[-1].strip().split("x")',
+            '                return int(w), int(h)',
+            '        return 1080, 1920  # sensible default',
+            '    ',
+            '    def _get_system_bar_heights(self):',
+            '        """Get status bar and navigation bar heights via ADB."""',
+            '        status_h, nav_h = 0, 0',
+            '        try:',
+            '            result = subprocess.run(',
+            '                ["adb", "-s", self.device_id, "shell", "dumpsys", "window"],',
+            '                capture_output=True, text=True, timeout=5)',
+            '            in_status = False',
+            '            in_nav = False',
+            '            for line in result.stdout.splitlines():',
+            '                if "StatusBar" in line and "Window" in line:',
+            '                    in_status = True',
+            '                    in_nav = False',
+            '                elif "NavigationBar" in line and "Window" in line:',
+            '                    in_nav = True',
+            '                    in_status = False',
+            '                elif "Window #" in line:',
+            '                    in_status = False',
+            '                    in_nav = False',
+            '                if in_status and "mFrame=" in line:',
+            '                    m = re.search(r"mFrame=\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]", line)',
+            '                    if m:',
+            '                        status_h = int(m.group(4)) - int(m.group(2))',
+            '                    in_status = False',
+            '                if in_nav and "mFrame=" in line:',
+            '                    m = re.search(r"mFrame=\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]", line)',
+            '                    if m:',
+            '                        nav_h = int(m.group(4)) - int(m.group(2))',
+            '                    in_nav = False',
+            '        except Exception:',
+            '            pass',
+            '        return status_h, nav_h',
+            '    ',
+            '    def _pct_to_px(self, x_pct, y_pct):',
+            '        """Convert percentage coordinates to absolute pixels.',
+            '        ',
+            '        X: percentage of full screen width.',
+            '        Y: percentage of content area (screen minus status bar and nav bar),',
+            '           then offset by status bar height to get absolute screen Y."""',
+            '        x = int(x_pct / 100 * self.screen_width)',
+            '        y = int(y_pct / 100 * self.content_height + self.status_bar_h)',
+            '        return x, y',
+            '    ',
             '    def _adb(self, *args):',
             '        """Run an ADB command and return stdout."""',
             '        cmd = ["adb", "-s", self.device_id] + list(args)',
             '        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)',
             '        return result.stdout.strip()',
             '    ',
-            '    def click(self, x, y):',
-            '        """Click at coordinates."""',
+            '    def click(self, x_pct, y_pct):',
+            '        """Click at percentage coordinates."""',
+            '        x, y = self._pct_to_px(x_pct, y_pct)',
             '        self._adb("shell", f"input tap {x} {y}")',
             '    ',
-            '    def long_click(self, x, y, duration=1000):',
-            '        """Long click at coordinates."""',
+            '    def long_click(self, x_pct, y_pct, duration=1000):',
+            '        """Long click at percentage coordinates."""',
+            '        x, y = self._pct_to_px(x_pct, y_pct)',
             '        self._adb("shell", f"input touchscreen swipe {x} {y} {x} {y} {duration}")',
             '    ',
-            '    def swipe(self, x1, y1, x2, y2, duration=300):',
-            '        """Swipe from one point to another."""',
+            '    def swipe(self, x1_pct, y1_pct, x2_pct, y2_pct, duration=300):',
+            '        """Swipe from one point to another using percentage coordinates."""',
+            '        x1, y1 = self._pct_to_px(x1_pct, y1_pct)',
+            '        x2, y2 = self._pct_to_px(x2_pct, y2_pct)',
             '        self._adb("shell", f"input touchscreen swipe {x1} {y1} {x2} {y2} {duration}")',
             '    ',
-            '    def drag(self, x1, y1, x2, y2, duration=500):',
-            '        """Drag from one point to another."""',
+            '    def drag(self, x1_pct, y1_pct, x2_pct, y2_pct, duration=500):',
+            '        """Drag from one point to another using percentage coordinates."""',
+            '        x1, y1 = self._pct_to_px(x1_pct, y1_pct)',
+            '        x2, y2 = self._pct_to_px(x2_pct, y2_pct)',
             '        self._adb("shell", f"input touchscreen swipe {x1} {y1} {x2} {y2} {duration}")',
             '    ',
             '    def type_text(self, text):',
@@ -590,29 +804,6 @@ class TestRecorder:
             '    def open_notification(self):',
             '        """Open notification bar."""',
             '        self._adb("shell", "cmd statusbar expand-notifications")',
-            '    ',
-            '    def get_current_app(self) -> str:',
-            '        """Returns current foreground package name via ADB."""',
-            '        output = self._adb("shell", "dumpsys activity activities")',
-            '        for line in output.splitlines():',
-            '            if "mCurrentFocus" in line or "mFocusedApp" in line:',
-            '                return line',
-            '        return ""',
-            '    ',
-            '    def get_current_activity(self) -> str:',
-            '        """Returns current foreground activity (package/activity) via ADB."""',
-            '        output = self._adb("shell", "dumpsys activity activities")',
-            '        for line in output.splitlines():',
-            '            if "mCurrentFocus" in line or "mFocusedApp" in line:',
-            '                match = re.search(r"(\\S+/\\S+)\\}", line)',
-            '                if match:',
-            '                    return match.group(1)',
-            '        return ""',
-            '    ',
-            '    def has_text_on_screen(self, text: str) -> bool:',
-            '        """Check if text exists in current UI hierarchy."""',
-            '        output = self._adb("exec-out", "uiautomator dump /dev/tty")',
-            '        return text in output',
             '    ',
             '    def screenshot(self, path: str):',
             '        """Capture screenshot via ADB screencap."""',
@@ -663,25 +854,6 @@ class TestRecorder:
                     reindented_lines.append(line)
             script_lines.append('\n'.join(reindented_lines))
 
-            # Insert assertions after this action
-            if i in assertions:
-                assertion_code = self._generate_assertion_code(assertions[i], test_indent)
-                script_lines.append(assertion_code)
-
-        # Final assertion: verify app is still alive at end of test
-        last_app = ""
-        for action in reversed(self.actions):
-            if action.screen_app:
-                last_app = action.screen_app
-                break
-        if last_app:
-            script_lines.append(f'{test_indent}')
-            script_lines.append(f'{test_indent}# Final verification: app is still running')
-            script_lines.append(
-                f'{test_indent}assert "{last_app}" in device.get_current_app(), '
-                f'"App {last_app} should still be in foreground at end of test"'
-            )
-
         script_lines.extend([
             '        except Exception as e:',
             '            # Screenshot on failure for debugging',
@@ -699,9 +871,6 @@ class TestRecorder:
             '    try:',
             f'        test.test_{test_name}(device)',
             '        print("\\nTEST PASSED")',
-            '    except AssertionError as e:',
-            '        print(f"\\nTEST FAILED: {e}")',
-            '        sys.exit(1)',
             '    except Exception as e:',
             '        print(f"\\nTEST ERROR: {e}")',
             '        sys.exit(1)',

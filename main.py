@@ -3,7 +3,6 @@ import os
 import warnings
 import subprocess
 import time
-import shlex
 
 # Suppress warnings and stderr output that can interfere with MCP protocol
 warnings.filterwarnings('ignore')
@@ -56,6 +55,48 @@ if device_id is None:
 mobile=Mobile(device=device_id, use_mcp_helper=True)
 recorder=TestRecorder()
 
+def _get_screen_size_cached() -> tuple:
+    """Get current screen size from the mobile instance (cached internally)."""
+    return mobile._get_screen_size()
+
+_system_bar_cache: tuple = None
+
+def _get_system_bar_heights() -> tuple:
+    """Get status bar and navigation bar heights via ADB. Cached after first call."""
+    global _system_bar_cache
+    if _system_bar_cache is not None:
+        return _system_bar_cache
+    import re as _re
+    status_h, nav_h = 0, 0
+    try:
+        output = adb_shell("dumpsys window")
+        in_status = False
+        in_nav = False
+        for line in output.splitlines():
+            if "StatusBar" in line and "Window" in line:
+                in_status = True
+                in_nav = False
+            elif "NavigationBar" in line and "Window" in line:
+                in_nav = True
+                in_status = False
+            elif "Window #" in line:
+                in_status = False
+                in_nav = False
+            if in_status and "mFrame=" in line:
+                m = _re.search(r'mFrame=\[(\d+),(\d+)\]\[(\d+),(\d+)\]', line)
+                if m:
+                    status_h = int(m.group(4)) - int(m.group(2))
+                in_status = False
+            if in_nav and "mFrame=" in line:
+                m = _re.search(r'mFrame=\[(\d+),(\d+)\]\[(\d+),(\d+)\]', line)
+                if m:
+                    nav_h = int(m.group(4)) - int(m.group(2))
+                in_nav = False
+    except Exception:
+        pass
+    _system_bar_cache = (status_h, nav_h)
+    return _system_bar_cache
+
 def _get_screen_context() -> tuple:
     """Get current foreground app/activity via ADB dumpsys.
 
@@ -99,8 +140,12 @@ def click_tool(x:int,y:int):
     # Use ADB input tap instead of uiautomator2 to avoid accessibility service conflict
     adb_shell(f"input tap {x} {y}")
     app, activity = _get_screen_context()
+    sw, sh = _get_screen_size_cached()
+    sb, nb = _get_system_bar_heights()
     recorder.record_action('click', {'x': x, 'y': y}, result=f'Clicked on ({x},{y})',
-                           screen_app=app, screen_activity=activity)
+                           screen_app=app, screen_activity=activity,
+                           screen_width=sw, screen_height=sh,
+                           status_bar_height=sb, nav_bar_height=nb)
     return f'Clicked on ({x},{y})'
 
 @mcp.tool('State-Tool',description='Get current screen state: interactive UI elements with label indices, types, names, and tap coordinates. Returns device context (current app, keyboard visibility, screen size). Set use_vision=True for annotated screenshot. Always call this first before interacting.')
@@ -127,11 +172,15 @@ def click_by_label(label:int):
     x, y = element.coordinates.x, element.coordinates.y
     adb_shell(f"input tap {x} {y}")
     app, activity = _get_screen_context()
+    sw, sh = _get_screen_size_cached()
+    sb, nb = _get_system_bar_heights()
     etype = getattr(element, 'element_type', '')
     recorder.record_action('click_by_label', {'label': label, 'name': element.name, 'x': x, 'y': y},
                            result=f'Clicked on label {label} ("{element.name}") at ({x},{y})',
                            element_name=element.name, element_type=etype,
-                           screen_app=app, screen_activity=activity)
+                           screen_app=app, screen_activity=activity,
+                           screen_width=sw, screen_height=sh,
+                           status_bar_height=sb, nav_bar_height=nb)
     return f'Clicked on label {label} ("{element.name}") at ({x},{y})'
 
 @mcp.tool(name='Long-Click-Tool',description='Long-press at (x,y) for ~1 second. Use for context menus or elements requiring sustained touch.')
@@ -139,8 +188,12 @@ def long_click_tool(x:int,y:int):
     # Use ADB input swipe with long duration to simulate long click
     adb_shell(f"input swipe {x} {y} {x} {y} 1000")
     app, activity = _get_screen_context()
+    sw, sh = _get_screen_size_cached()
+    sb, nb = _get_system_bar_heights()
     recorder.record_action('long_click', {'x': x, 'y': y}, result=f'Long Clicked on ({x},{y})',
-                           screen_app=app, screen_activity=activity)
+                           screen_app=app, screen_activity=activity,
+                           screen_width=sw, screen_height=sh,
+                           status_bar_height=sb, nav_bar_height=nb)
     return f'Long Clicked on ({x},{y})'
 
 @mcp.tool(name='Swipe-Tool',description='Swipe from (x1,y1) to (x2,y2) over 300ms. To scroll DOWN, swipe from bottom to top. To scroll UP, swipe from top to bottom.')
@@ -148,9 +201,13 @@ def swipe_tool(x1:int,y1:int,x2:int,y2:int):
     # Use ADB input swipe
     adb_shell(f"input swipe {x1} {y1} {x2} {y2} 300")
     app, activity = _get_screen_context()
+    sw, sh = _get_screen_size_cached()
+    sb, nb = _get_system_bar_heights()
     recorder.record_action('swipe', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2},
                            result=f'Swiped from ({x1},{y1}) to ({x2},{y2})',
-                           screen_app=app, screen_activity=activity)
+                           screen_app=app, screen_activity=activity,
+                           screen_width=sw, screen_height=sh,
+                           status_bar_height=sb, nav_bar_height=nb)
     return f'Swiped from ({x1},{y1}) to ({x2},{y2})'
 
 @mcp.tool(name='Type-Tool',description='Tap (x,y) to focus the input field, then type the given text. Only use on input/editable elements.')
@@ -172,10 +229,14 @@ def type_tool(text:str,x:int,y:int,clear:bool=False):
                     break
     except Exception:
         pass
+    sw, sh = _get_screen_size_cached()
+    sb, nb = _get_system_bar_heights()
     recorder.record_action('type', {'text': text, 'x': x, 'y': y, 'clear': clear},
                            result=f'Typed "{text}" on ({x},{y})',
                            element_name=elem_name, element_type="input",
-                           screen_app=app, screen_activity=activity)
+                           screen_app=app, screen_activity=activity,
+                           screen_width=sw, screen_height=sh,
+                           status_bar_height=sb, nav_bar_height=nb)
     return f'Typed "{text}" on ({x},{y})'
 
 @mcp.tool(name='Drag-Tool',description='Drag from (x1,y1) to (x2,y2) over 500ms. Use for reordering, moving items, or adjusting sliders.')
@@ -183,9 +244,13 @@ def drag_tool(x1:int,y1:int,x2:int,y2:int):
     # Use ADB input swipe with longer duration for drag
     adb_shell(f"input swipe {x1} {y1} {x2} {y2} 500")
     app, activity = _get_screen_context()
+    sw, sh = _get_screen_size_cached()
+    sb, nb = _get_system_bar_heights()
     recorder.record_action('drag', {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2},
                            result=f'Dragged from ({x1},{y1}) and dropped on ({x2},{y2})',
-                           screen_app=app, screen_activity=activity)
+                           screen_app=app, screen_activity=activity,
+                           screen_width=sw, screen_height=sh,
+                           status_bar_height=sb, nav_bar_height=nb)
     return f'Dragged from ({x1},{y1}) and dropped on ({x2},{y2})'
 
 @mcp.tool(name='Press-Tool',description='Press a device button: home, back, menu, power, volume_up, volume_down, enter, delete. Also accepts raw Android KEYCODE strings.')
@@ -204,8 +269,12 @@ def press_tool(button:str):
     keycode = keycode_map.get(button.lower(), button)
     adb_shell(f"input keyevent {keycode}")
     app, activity = _get_screen_context()
+    sw, sh = _get_screen_size_cached()
+    sb, nb = _get_system_bar_heights()
     recorder.record_action('press', {'button': button}, result=f'Pressed the "{button}" button',
-                           screen_app=app, screen_activity=activity)
+                           screen_app=app, screen_activity=activity,
+                           screen_width=sw, screen_height=sh,
+                           status_bar_height=sb, nav_bar_height=nb)
     return f'Pressed the "{button}" button'
 
 @mcp.tool(name='Notification-Tool',description='Access the notifications seen on the device')
@@ -213,8 +282,12 @@ def notification_tool():
     # Open notification panel by swiping down from top or using service call
     adb_shell("cmd statusbar expand-notifications")
     app, activity = _get_screen_context()
+    sw, sh = _get_screen_size_cached()
+    sb, nb = _get_system_bar_heights()
     recorder.record_action('notification', {}, result='Accessed notification bar',
-                           screen_app=app, screen_activity=activity)
+                           screen_app=app, screen_activity=activity,
+                           screen_width=sw, screen_height=sh,
+                           status_bar_height=sb, nav_bar_height=nb)
     return 'Accessed notification bar'
 
 @mcp.tool(name='Wait-Tool',description='Wait for a specific amount of time')
@@ -222,8 +295,12 @@ def wait_tool(duration:int):
     # Use Python's time.sleep instead of uiautomator2 to avoid accessibility service conflict
     time.sleep(duration)
     app, activity = _get_screen_context()
+    sw, sh = _get_screen_size_cached()
+    sb, nb = _get_system_bar_heights()
     recorder.record_action('wait', {'duration': duration}, result=f'Waited for {duration} seconds',
-                           screen_app=app, screen_activity=activity)
+                           screen_app=app, screen_activity=activity,
+                           screen_width=sw, screen_height=sh,
+                           status_bar_height=sb, nav_bar_height=nb)
     return f'Waited for {duration} seconds'
 
 @mcp.tool(name='Start-Recording-Tool',description='Start recording test actions')
@@ -231,19 +308,19 @@ def start_recording_tool():
     recorder.start()
     return 'Test recording started. All subsequent actions will be recorded.'
 
-@mcp.tool(name='Stop-Recording-Tool',description='Stop recording test actions. After stopping, use Export-Test-Script with format="pytest" to generate a test with assertions.')
+@mcp.tool(name='Stop-Recording-Tool',description='Stop recording test actions. After stopping, use Export-Test-Script to generate a test script.')
 def stop_recording_tool():
     recorder.stop()
     count = len(recorder.get_actions())
     return f'Test recording stopped. {count} actions recorded. Use Export-Test-Script to export.'
 
-@mcp.tool(name='Export-Test-Script',description='Export recorded test actions as executable test script. Supported formats: python (default, simple replay script), pytest (with assertions), json, readable.')
+@mcp.tool(name='Export-Test-Script',description='Export recorded test actions as executable test script. Supported formats: python (default, simple replay script), pytest (pytest-compatible), json, readable.')
 def export_test_script(format:str='python',filename:str=None,test_name:str=None)->str:
     """
     Export recorded test actions.
 
     Parameters:
-    - format: 'python' (DEFAULT — simple, readable replay script), 'pytest' (with assertions), 'json' (JSON data), 'readable' (human-readable steps)
+    - format: 'python' (DEFAULT — simple, readable replay script), 'pytest' (pytest-compatible), 'json' (JSON data), 'readable' (human-readable steps)
     - filename: Optional custom filename
     - test_name: Optional custom test name for Python/pytest exports
     """
@@ -397,163 +474,6 @@ def report_bug_to_azure_command(
 ```
 """
     return result
-
-@mcp.tool(name='Report-Bug-To-Azure-Direct',description='[EXPERIMENTAL] Report a bug to Azure DevOps - direct execution (may hang)')
-def report_bug_to_azure(
-    title: str,
-    steps_to_reproduce: str,
-    expected_result: str,
-    actual_result: str,
-    description: str = "",
-    project: str = None,
-    parent_user_story: str = None,
-    severity: str = "3 - Medium",
-    priority: int = 2,
-    environment: str = None
-):
-    """
-    Report a bug to Azure DevOps using Azure CLI with proper bug report structure.
-
-    Parameters:
-    - title: Bug title (required) - Short, clear description of the issue
-    - steps_to_reproduce: Clear steps to replicate the bug (required)
-    - expected_result: What should happen (required)
-    - actual_result: What actually happened (required)
-    - description: Additional context or details (optional)
-    - project: Azure DevOps project name (optional, uses default if not specified)
-    - parent_user_story: Parent user story ID to link this bug to (optional)
-    - severity: Bug severity (default: "3 - Medium")
-    - priority: Bug priority 1-4 (default: 2)
-    - environment: Device/OS/App version info (optional)
-    """
-    try:
-        # First, test if Azure CLI is accessible
-        try:
-            test_result = subprocess.run("az --version", capture_output=True, text=True, timeout=5, shell=True)
-            if test_result.returncode != 0:
-                return "❌ Error: Azure CLI is not responding. Please ensure it's properly installed and configured."
-        except subprocess.TimeoutExpired:
-            return "❌ Error: Azure CLI is not responding (timeout). Please check your Azure CLI installation."
-        except Exception as e:
-            return f"❌ Error: Cannot access Azure CLI: {str(e)}"
-
-        # Auto-detect device environment if not provided
-        if not environment:
-            try:
-                # Get device info from mobile instance
-                device_info = mobile.get_device().device_info
-                environment = f"Device: {device_info.get('brand', 'Unknown')} {device_info.get('model', 'Unknown')}\n"
-                environment += f"OS Version: Android {device_info.get('version', 'Unknown')}\n"
-                environment += f"SDK: {device_info.get('sdk', 'Unknown')}"
-            except:
-                environment = "Device info not available"
-
-        # Build the Description or Steps field as HTML (Custom.DescriptionorSteps)
-        import re
-        description_steps = ""
-        if description:
-            description_steps += f"<p>{description}</p>"
-        description_steps += "<p><strong>Steps to Reproduce:</strong></p><ol>"
-        for step in steps_to_reproduce.split("\n"):
-            step = step.strip()
-            if step:
-                step_text = re.sub(r'^[\d]+[\.\)\-\s]+', '', step).strip()
-                if step_text:
-                    description_steps += f"<li>{step_text}</li>"
-        description_steps += "</ol>"
-        if environment:
-            description_steps += f"<p><strong>Environment:</strong> {environment}</p>"
-
-        # Build the Azure CLI command
-        cmd = ["az", "boards", "work-item", "create", "--type", "Bug"]
-
-        # Add title
-        cmd.extend(["--title", title])
-
-        # Add project if specified
-        if project:
-            cmd.extend(["--project", project])
-
-        # Wrap actual_result and expected_result in HTML for proper rendering
-        actual_result_html = f"<div><span style=\"display:inline !important;\">{actual_result}</span><br> </div>"
-        expected_result_html = f"<div><span style=\"display:inline !important;\">{expected_result}</span><br> </div>"
-
-        # Use the correct Azure DevOps fields matching the board layout
-        fields = [
-            f"Custom.DescriptionorSteps={description_steps}",
-            f"Microsoft.VSTS.TCM.ReproSteps={actual_result_html}",
-            f"Microsoft.VSTS.TCM.SystemInfo={expected_result_html}",
-            f"Microsoft.VSTS.Common.Severity={severity}",
-            f"Microsoft.VSTS.Common.Priority={priority}"
-        ]
-
-        # Add parent user story if specified
-        if parent_user_story:
-            fields.append(f"System.Parent={parent_user_story}")
-
-        # Add all fields
-        for field in fields:
-            cmd.extend(["--fields", field])
-
-        # Add output format and suppress warnings
-        cmd.extend(["--output", "json", "--only-show-errors"])
-
-        # Execute the command (shell=True for Windows compatibility)
-        # Properly quote arguments for shell execution
-        try:
-            cmd_string = shlex.join(cmd)  # Python 3.8+
-        except AttributeError:
-            # Fallback for older Python versions
-            cmd_string = " ".join(shlex.quote(arg) for arg in cmd)
-
-        # Reduced timeout to 15 seconds to avoid long waits
-        result = subprocess.run(cmd_string, capture_output=True, text=True, timeout=15, shell=True)
-
-        if result.returncode != 0:
-            error_msg = result.stderr.strip()
-
-            # Check for common errors and provide helpful messages
-            if "not logged in" in error_msg.lower() or "authentication" in error_msg.lower():
-                return "❌ Error: Not logged in to Azure. Please run 'az login' first."
-            elif "project" in error_msg.lower() and "not found" in error_msg.lower():
-                return f"❌ Error: Project '{project}' not found. Please specify a valid project name or use the default project."
-            elif "az boards" in error_msg:
-                return "❌ Error: Azure DevOps extension not found. Please install it with: az extension add --name azure-devops"
-            else:
-                return f"❌ Error creating bug in Azure DevOps:\n{error_msg}"
-
-        # Parse the response
-        import json
-        response = json.loads(result.stdout)
-        bug_id = response.get("id", "Unknown")
-        bug_url = response.get("url", "")
-
-        success_msg = f"✅ Bug reported successfully to Azure DevOps!\n\n"
-        success_msg += f"📋 Bug ID: #{bug_id}\n"
-        success_msg += f"📝 Title: {title}\n"
-        success_msg += f"⚠️ Severity: {severity} | Priority: {priority}\n"
-        if project:
-            success_msg += f"🗂️ Project: {project}\n"
-        if parent_user_story:
-            success_msg += f"🔗 Linked to User Story: #{parent_user_story}\n"
-        success_msg += f"\n📊 Bug Report Structure:\n"
-        success_msg += f"   ✓ Steps to Reproduce\n"
-        success_msg += f"   ✓ Expected Result\n"
-        success_msg += f"   ✓ Actual Result\n"
-        success_msg += f"   ✓ Environment Info\n"
-        if bug_url:
-            success_msg += f"\n🔗 View in Azure DevOps: {bug_url}\n"
-
-        return success_msg
-
-    except FileNotFoundError:
-        return "❌ Error: Azure CLI not found. Please install Azure CLI first: https://aka.ms/installazurecliwindows"
-    except subprocess.TimeoutExpired:
-        return "❌ Error: Command timed out after 15 seconds. This might be due to:\n  - Network connectivity issues\n  - Azure CLI waiting for authentication\n  - Large project size\nPlease check 'az login' status and try again."
-    except json.JSONDecodeError:
-        return f"❌ Error: Failed to parse Azure CLI response. Output:\n{result.stdout}"
-    except Exception as e:
-        return f"❌ Unexpected error: {str(e)}"
 
 if __name__ == '__main__':
     mcp.run()
