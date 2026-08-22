@@ -3,6 +3,7 @@
 Diagnostic script to troubleshoot MCP Helper and Android-MCP connection issues
 """
 
+from android_mcp.bootstrap import PORTAL_PACKAGE
 import sys
 import time
 import subprocess
@@ -40,7 +41,7 @@ def check_mcp_helper():
             capture_output=True, text=True, timeout=5
         )
 
-        if 'com.HadyAhmed00.MCP_Helper' in result.stdout:
+        if PORTAL_PACKAGE in result.stdout:
             print("[OK] MCP Helper is installed")
             return True
         else:
@@ -62,7 +63,7 @@ def test_mcp_helper_ping():
         print("Sending ping request...")
         result = subprocess.run(
             ['adb', 'shell', 'content', 'query', '--uri',
-             'content://com.HadyAhmed00.MCP_Helper/ping'],
+             f'content://{PORTAL_PACKAGE}/ping'],
             capture_output=True, text=True, timeout=10
         )
 
@@ -93,7 +94,7 @@ def test_python_import():
     print("=" * 60)
 
     try:
-        from src.mcp_helper import MCPHelperClient
+        from android_mcp.mcp_helper import MCPHelperClient
         print("[OK] MCPHelperClient imported successfully")
         return True
     except ImportError as e:
@@ -180,7 +181,7 @@ def main():
 
         if not results[1][1]:
             print("[ACTION] Install MCP Helper app on your device")
-            print("  See: https://github.com/HadyAhmed00/Android-MCP-Helper")
+            print("  Run: uvx android-mcp setup")
 
         if not results[2][1]:
             print("[ACTION] Ensure MCP Helper app is running")

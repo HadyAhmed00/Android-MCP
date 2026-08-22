@@ -6,10 +6,10 @@ MCP Helper is already integrated into Android-MCP. Just ensure the MCP Helper ap
 
 ```bash
 # Check if installed
-adb shell pm list packages | grep MCP_Helper
+adb shell pm list packages | grep portal
 
 # Expected output:
-# package:com.HadyAhmed00.MCP_Helper
+# package:io.github.hadyahmed00.portal
 ```
 
 ## Using with Android-MCP
@@ -179,7 +179,7 @@ Common Android key codes for `keyboard_key()`:
 
 ### Check if MCP Helper is running
 ```bash
-adb shell dumpsys activity services | grep MCP_Helper
+adb shell dumpsys activity services | grep portal
 ```
 
 ### Test connection
@@ -199,13 +199,13 @@ print(f"Version: {client.get_version()}")  # e.g., "0.4.8"
 ### Manual ADB query (debug)
 ```bash
 # Query phone state directly
-adb shell content query --uri content://com.HadyAhmed00.MCP_Helper/phone_state
+adb shell content query --uri content://io.github.hadyahmed00.portal/phone_state
 
 # Query accessibility tree
-adb shell content query --uri content://com.HadyAhmed00.MCP_Helper/a11y_tree
+adb shell content query --uri content://io.github.hadyahmed00.portal/a11y_tree
 
 # Get installed apps
-adb shell content query --uri content://com.HadyAhmed00.MCP_Helper/packages
+adb shell content query --uri content://io.github.hadyahmed00.portal/packages
 ```
 
 ## Performance Tips

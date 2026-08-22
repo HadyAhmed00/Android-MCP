@@ -186,7 +186,7 @@ Result: Only disables after 3 tries, informative progress
 
 **If continues**: Check device status
 ```bash
-adb -s <device_id> shell content query --uri content://com.HadyAhmed00.MCP_Helper/ping
+adb -s <device_id> shell content query --uri content://io.github.hadyahmed00.portal/ping
 ```
 
 ### "Still showing 'temporary error' after multiple calls"

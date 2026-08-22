@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 6 * * 1'   # weekly: catch a Portal release disappearing from under the pin
+
+jobs:
+  build-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.12', '3.13']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Build wheel
+        run: uv build
+      - name: Install wheel into a clean env and smoke it
+        shell: bash
+        run: |
+          uv venv .smoke
+          VIRTUAL_ENV=.smoke uv pip install --python ${{ matrix.python }} dist/*.whl
+          BIN=.smoke/bin; [ -d .smoke/Scripts ] && BIN=.smoke/Scripts
+          "$BIN/python" -c "import android_mcp.server, android_mcp.bootstrap, android_mcp.adb; print('imports ok')"
+          "$BIN/android-mcp" --help
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uvx ruff check .
+
+  apk-pin-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/check_apk_pin.py

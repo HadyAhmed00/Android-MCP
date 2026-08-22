@@ -1,14 +1,16 @@
-from src.tree.views import TreeState, ElementNode, CenterCord, BoundingBox, classify_element
-from src.tree.utils import extract_cordinates,get_center_cordinates
-from src.tree.config import INTERACTIVE_CLASSES
-from PIL import Image, ImageFont, ImageDraw
-from xml.etree.ElementTree import Element
-from xml.etree import ElementTree
-from typing import TYPE_CHECKING
 import random
+from typing import TYPE_CHECKING
+from xml.etree import ElementTree
+from xml.etree.ElementTree import Element
+
+from PIL import Image, ImageDraw, ImageFont
+
+from android_mcp.tree.config import INTERACTIVE_CLASSES
+from android_mcp.tree.utils import extract_cordinates, get_center_cordinates
+from android_mcp.tree.views import BoundingBox, CenterCord, ElementNode, TreeState, classify_element
 
 if TYPE_CHECKING:
-    from src.mobile import Mobile
+    from android_mcp.mobile import Mobile
 
 class Tree:
     def __init__(self,mobile:'Mobile'):

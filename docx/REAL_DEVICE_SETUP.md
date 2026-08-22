@@ -68,17 +68,17 @@ b44fbcc9               device product:RMX1851 model:RMX1851 ...
 
 ### 2. Check MCP Helper is Installed
 ```bash
-adb -s b44fbcc9 shell pm list packages | grep MCP_Helper
+adb -s b44fbcc9 shell pm list packages | grep portal
 ```
 
 Expected output:
 ```
-package:com.HadyAhmed00.MCP_Helper
+package:io.github.hadyahmed00.portal
 ```
 
 ### 3. Test MCP Helper on Real Device
 ```bash
-adb -s b44fbcc9 shell content query --uri content://com.HadyAhmed00.MCP_Helper/ping
+adb -s b44fbcc9 shell content query --uri content://io.github.hadyahmed00.portal/ping
 ```
 
 Expected output:
@@ -124,13 +124,13 @@ adb -s b44fbcc9 shell getprop ro.product.model
 
 ### Step 4: Check MCP Helper
 ```bash
-adb -s b44fbcc9 shell pm list packages | grep MCP_Helper
+adb -s b44fbcc9 shell pm list packages | grep portal
 # Should show the app is installed
 ```
 
 ### Step 5: Test MCP Helper
 ```bash
-adb -s b44fbcc9 shell content query --uri content://com.HadyAhmed00.MCP_Helper/ping
+adb -s b44fbcc9 shell content query --uri content://io.github.hadyahmed00.portal/ping
 # Should return pong
 ```
 
@@ -177,14 +177,18 @@ adb devices
 **Solution**:
 ```bash
 # Check if installed
-adb -s <device_id> shell pm list packages | grep MCP_Helper
+adb -s <device_id> shell pm list packages | grep portal
 
-# If not installed, install the app manually:
-# 1. Download APK from https://github.com/HadyAhmed00/Android-MCP-Helper
-# 2. Install: adb install app-release.apk
+# If not installed, let the server do it:
+uvx android-mcp setup --device <device_id>        # add --force-setup to reinstall
+
+# Manual fallback (OEMs that block enabling a11y services over ADB):
+# 1. Download portal.apk from https://github.com/HadyAhmed00/Android-MCP-Portal/releases
+# 2. adb install -r portal.apk
+# 3. Settings -> Accessibility -> Droidrun Portal -> enable
 
 # If installed, check it's running:
-adb -s <device_id> shell am start com.HadyAhmed00.MCP_Helper/.MainActivity
+adb -s <device_id> shell am start io.github.hadyahmed00.portal/.MainActivity
 ```
 
 ### Issue: "Permission denied" or "Read-only file system"
@@ -337,8 +341,8 @@ If you encounter issues:
 
 1. Run diagnostic: `python diagnose_mcp.py`
 2. Check device: `adb devices -l`
-3. Test MCP Helper: `adb -s <id> shell content query --uri content://com.HadyAhmed00.MCP_Helper/ping`
-4. Check logs: `adb logcat | grep MCP_Helper`
+3. Test MCP Helper: `adb -s <id> shell content query --uri content://io.github.hadyahmed00.portal/ping`
+4. Check logs: `adb logcat | grep portal`
 5. Restart device: `adb reboot`
 
 ---

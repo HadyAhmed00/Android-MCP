@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "android-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "Lightweight MCP Server for Android Operating System"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,17 +12,31 @@ license = { file = "LICENSE" }
 urls = { Homepage = "https://github.com/HadyAhmed00/Android-MCP" }
 keywords = ["android", "mcp", "mobile", "automation"]
 authors = [
-    { name = "Hady Ahmed", email = "hady.ahmed@example.com" }
+    { name = "Hady Ahmed", email = "hadyahmed5000@gmail.com" }
 ]
 dependencies = [
-    "ipykernel>=6.30.1",
-    "mcp>=1.9.3",
+    "mcp>=1.9.3,<2",
     "pillow>=11.2.1",
     "uiautomator2>=3.3.1",
 ]
 
 [project.scripts]
-android-mcp = "main:mcp"
+android-mcp = "android_mcp.server:main"
 
 [dependency-groups]
-dev = []
+dev = ["ruff>=0.6"]
+
+[tool.setuptools.packages.find]
+include = ["android_mcp*"]
+
+[tool.ruff]
+line-length = 100
+# test_*.py at the root are generated artifacts (Export-Test-Script), docx/ holds
+# scratch diagnostics - neither is hand-maintained source.
+extend-exclude = ["test_*.py", "docx", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+# E402: server.py must redirect stderr before importing MCP libs; E722: pre-existing
+# broad excepts in device code that intentionally never propagate.
+ignore = ["E501", "E402", "E722"]

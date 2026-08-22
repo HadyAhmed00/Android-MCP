@@ -242,7 +242,7 @@ If MCP Helper is still being lost:
 
 2. **Verify MCP Helper is running**
    ```bash
-   adb -s <device_id> shell content query --uri content://com.HadyAhmed00.MCP_Helper/ping
+   adb -s <device_id> shell content query --uri content://io.github.hadyahmed00.portal/ping
    ```
 
 3. **Run diagnostics**

@@ -10,73 +10,71 @@
 - **Physical Device Support**: Connect to real Android devices via ADB
 - **Vision Capabilities**: Generate annotated screenshots with numbered UI elements for vision-based AI agents
 - **Test Recording**: Record user interactions and export as executable test scripts (Python, JSON, or human-readable format)
-- **Test Script Export**: Export recorded tests in multiple formats for CI/CD integration
+- **Test Script Export**: Export recorded tests as Python (ADB or uiautomator2), pytest, JSON, or human-readable format
 
 ## Requirements
 
-- Python 3.12+
-- Android device or emulator running
-- ADB (Android Debug Bridge) installed and configured
-- `uiautomator2` compatible Android device (Android 4.4+)
+- An Android device or emulator with USB debugging enabled
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) (it fetches Python for you)
+
+That's it. ADB is bundled, and the Portal helper app is installed onto the device
+automatically on first use.
 
 ## Installation
 
-### From Source
-
-1. Clone the repository:
 ```bash
-git clone https://github.com/HadyAhmed00/Android-MCP.git
-cd Android-MCP
+claude mcp add android -- uvx android-mcp@latest --emulator
 ```
 
-2. Install dependencies:
-```bash
-pip install -e .
-```
+Drop `--emulator` for a physical device, or pass `--device <id>` to pick one.
 
-Or install manually:
-```bash
-pip install mcp uiautomator2 pillow ipykernel
-```
+For any other MCP client, use the equivalent config:
 
-## Quick Start
-
-### 1. Start the MCP Server
-
-**For emulator:**
-```bash
-python main.py --emulator
-```
-
-**For physical device:**
-```bash
-python main.py
-```
-
-The server will connect to your Android device via ADB and start listening for MCP client connections.
-
-### 2. Configure with MCP Client
-
-To use this with Claude Code or other MCP clients, add the following to your MCP configuration:
-
-**Example MCP Config:**
 ```json
 {
   "mcpServers": {
     "android-mcp": {
-      "command": "python",
-      "args": [
-        "/path/to/Android-MCP/main.py",
-        "--emulator"
-      ]
+      "command": "uvx",
+      "args": ["android-mcp@latest", "--emulator"]
     }
   }
 }
 ```
 
+### What happens on first use
+
+1. **ADB** — uses `adb` from your PATH, or falls back to the copy bundled with the
+   `adbutils` dependency, so no Android SDK install is required.
+2. **Portal app** — the fast state-reading backend needs the
+   [Portal app](https://github.com/HadyAhmed00/Android-MCP-Portal) on the device. If it is
+   missing, the server downloads the pinned APK, installs it, and enables its accessibility
+   service, then verifies with a ping.
+3. If any of that fails (some OEMs block enabling accessibility services over ADB), the
+   server prints manual steps and keeps working on the slower UIAutomator2 backend.
+
+Run it yourself any time with:
+
+```bash
+uvx android-mcp setup --device emulator-5554     # add --force-setup to reinstall
+```
+
+or ask the agent to call the `Setup-Device` tool.
+
+Flags: `--skip-bootstrap` never touches the device, `--portal-apk <path>` installs a local APK.
+The downloaded APK is cached per-user; set `ANDROID_MCP_CACHE_DIR` to move that cache.
+
+### From source (development)
+
+```bash
+git clone https://github.com/HadyAhmed00/Android-MCP.git
+cd Android-MCP
+uv sync
+python main.py --emulator          # or: python -m android_mcp --emulator
+```
+
 ## Available Tools
 
-The MCP server exposes 14 tools for controlling Android devices and recording test cases:
+The MCP server exposes 19 tools for controlling Android devices and recording test cases:
 
 ### 1. **State-Tool**
 Get the current state of the device including UI hierarchy and optional screenshot.
@@ -186,6 +184,21 @@ Wait for a specified duration (useful for allowing apps to load).
 ```
 Wait for 2 seconds
 ```
+
+### 9b. **Click-By-Label**
+Tap an element by its label index from the most recent `State-Tool` output. Preferred over
+raw coordinates. **Indices are positional and only valid against the latest state** — they
+shift whenever the screen changes.
+
+**Parameters:**
+- `label` (int): Index from the `--- Interactive Elements ---` list
+
+### 9c. **Setup-Device**
+Install the Portal helper app and enable its accessibility service. Use it when `State-Tool`
+is slow or the fast backend is unavailable.
+
+**Parameters:**
+- `force` (bool, optional): Reinstall even if the app already works
 
 ### 10. **Start-Recording-Tool**
 Start recording test actions for later export and playback.

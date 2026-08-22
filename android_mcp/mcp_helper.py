@@ -7,8 +7,10 @@ instead of the slower UIAutomator XML dump mechanism.
 import json
 import subprocess
 from dataclasses import dataclass
-from typing import Optional, Dict, List, Any
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from android_mcp.adb import adb_base
 
 
 class ContentProviderEndpoint(Enum):
@@ -163,9 +165,7 @@ class MCPHelperClient:
         Returns:
             Parsed response dict with 'status' and 'data' fields
         """
-        cmd = ["adb"]
-        if self.device_id:
-            cmd.extend(["-s", self.device_id])
+        cmd = adb_base(self.device_id)
         cmd.extend(["shell", "content", "query", "--uri", uri])
 
         try:
@@ -316,9 +316,7 @@ class MCPHelperClient:
         """
         import base64
         base64_text = base64.b64encode(text.encode()).decode()
-        cmd = ["adb"]
-        if self.device_id:
-            cmd.extend(["-s", self.device_id])
+        cmd = adb_base(self.device_id)
         cmd.extend([
             "shell", "content", "insert",
             "--uri", f"content://{self.PROVIDER_AUTHORITY}/keyboard/input",
@@ -339,9 +337,7 @@ class MCPHelperClient:
         Returns:
             True if successful
         """
-        cmd = ["adb"]
-        if self.device_id:
-            cmd.extend(["-s", self.device_id])
+        cmd = adb_base(self.device_id)
         cmd.extend([
             "shell", "content", "insert",
             "--uri", f"content://{self.PROVIDER_AUTHORITY}/keyboard/clear"
@@ -362,9 +358,7 @@ class MCPHelperClient:
         Returns:
             True if successful
         """
-        cmd = ["adb"]
-        if self.device_id:
-            cmd.extend(["-s", self.device_id])
+        cmd = adb_base(self.device_id)
         cmd.extend([
             "shell", "content", "insert",
             "--uri", f"content://{self.PROVIDER_AUTHORITY}/keyboard/key",
@@ -386,9 +380,7 @@ class MCPHelperClient:
         Returns:
             True if successful
         """
-        cmd = ["adb"]
-        if self.device_id:
-            cmd.extend(["-s", self.device_id])
+        cmd = adb_base(self.device_id)
         cmd.extend([
             "shell", "content", "insert",
             "--uri", f"content://{self.PROVIDER_AUTHORITY}/overlay_offset",
@@ -410,9 +402,7 @@ class MCPHelperClient:
         Returns:
             True if successful
         """
-        cmd = ["adb"]
-        if self.device_id:
-            cmd.extend(["-s", self.device_id])
+        cmd = adb_base(self.device_id)
         cmd.extend([
             "shell", "content", "insert",
             "--uri", f"content://{self.PROVIDER_AUTHORITY}/overlay_visible",
@@ -434,9 +424,7 @@ class MCPHelperClient:
         Returns:
             True if successful
         """
-        cmd = ["adb"]
-        if self.device_id:
-            cmd.extend(["-s", self.device_id])
+        cmd = adb_base(self.device_id)
         cmd.extend([
             "shell", "content", "insert",
             "--uri", f"content://{self.PROVIDER_AUTHORITY}/socket_port",

@@ -150,3 +150,33 @@ If you need help with your contribution:
 - Check existing code for examples
 
 Thank you for contributing to Android-MCP!
+
+## Releasing
+
+Releases are automated. Two repos are involved.
+
+### The Python server (this repo)
+
+1. **PR titles must be Conventional Commits** — `feat:`, `fix:`, `docs:`, `chore:`, with
+   `feat!:` / `BREAKING CHANGE:` for a major. PRs are squash-merged, so the PR title becomes
+   the commit subject that release-please reads.
+2. On merge to `main`, release-please opens/updates a `chore(main): release X.Y.Z` PR with the
+   version bump (`pyproject.toml` + `android_mcp/__init__.py`) and a generated `CHANGELOG.md`.
+3. Merging that PR tags `vX.Y.Z` and publishes the GitHub Release.
+4. The `publish` workflow then uploads to PyPI via Trusted Publishing (OIDC — no token secret).
+
+One-time setup before the first release: register the trusted publisher on PyPI
+(project `android-mcp`, owner `HadyAhmed00`, repo `Android-MCP`, workflow `publish.yml`,
+environment `pypi`).
+
+### The Portal APK (`HadyAhmed00/Android-MCP-Portal`)
+
+The server downloads a **pinned** APK, so a new Portal build needs two steps:
+
+1. In the Portal repo, push a `vX.Y.Z` tag. Its `release` workflow builds a signed
+   `portal.apk`, computes `portal.apk.sha256`, and attaches both to the GitHub Release.
+2. Here, update `PORTAL_APK_TAG` and `PORTAL_APK_SHA256` in `android_mcp/bootstrap.py` and
+   open a PR titled `fix(portal): bump APK pin to vX.Y.Z` — that yields a patch release.
+
+CI's `apk-pin-check` job (also weekly on a schedule) downloads the pinned URL and verifies the
+checksum, so a deleted or retagged Portal release is caught before users hit it.

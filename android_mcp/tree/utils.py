@@ -1,5 +1,6 @@
 import re
 
+
 def extract_cordinates(node):
     attributes = node.attrib
     bounds=attributes.get('bounds')

@@ -1,10 +1,10 @@
 """Test action recorder for capturing and exporting test scripts."""
 
-from dataclasses import dataclass, asdict
-from typing import List, Any
-from datetime import datetime
 import json
+from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
+from typing import List
 
 
 @dataclass

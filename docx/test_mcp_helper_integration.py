@@ -11,9 +11,9 @@ import io
 # Force UTF-8 output on Windows
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-from src.mcp_helper import MCPHelperClient
-from src.mcp_helper_adapter import MCPHelperTreeAdapter, MCPHelperMobileAdapter
-from src.mobile import Mobile
+from android_mcp.mcp_helper import MCPHelperClient
+from android_mcp.mcp_helper_adapter import MCPHelperTreeAdapter, MCPHelperMobileAdapter
+from android_mcp.mobile import Mobile
 
 
 def test_mcp_helper_direct():
