@@ -65,7 +65,7 @@ both under `pytest test_x.py` and as a plain script.
   "mcpServers": {
     "android-mcp": {
       "command": "uvx",
-      "args": ["android-mcp-portal@latest", "--emulator"]
+      "args": ["--from", "git+https://github.com/HadyAhmed00/Android-MCP@main", "android-mcp-portal", "--emulator"]
     }
   }
 }
@@ -73,7 +73,7 @@ both under `pytest test_x.py` and as a plain script.
 
 ## Architecture
 
-**Package layout:** everything lives in `android_mcp/`. Root `main.py` is a 3-line shim kept so existing MCP configs pointing at an absolute `main.py` path keep working; the PyPI distribution is **`android-mcp-portal`** (the bare `android-mcp` name on PyPI is an unrelated project), and it installs two console scripts — `android-mcp-portal` and `android-mcp` — both pointing at `android_mcp.server:main`.
+**Package layout:** everything lives in `android_mcp/`. Root `main.py` is a 3-line shim kept so existing MCP configs pointing at an absolute `main.py` path keep working; the PyPI distribution is **`android-mcp-portal`** (not published yet — installs currently come from git) (the bare `android-mcp` name on PyPI is an unrelated project), and it installs two console scripts — `android-mcp-portal` and `android-mcp` — both pointing at `android_mcp.server:main`.
 
 **Entry point:** `android_mcp/server.py` — Creates a `FastMCP` server, defines all MCP tools (`grep -c "@mcp.tool" android_mcp/server.py` to confirm the count), and wires up device interaction via direct ADB shell commands. **Nothing device-related may happen at import time** — argv parsing and the `mobile`/`recorder` singletons are created inside `main()`, because the module is imported by the console-script wrapper and by CI smoke tests with no device attached. Only the `FastMCP` instance and the `@mcp.tool` registrations are module-level. **Note:** stderr is suppressed at import time to prevent library warnings from breaking the MCP protocol. To debug import issues, uncomment the `sys.stderr = _original_stderr` line in `android_mcp/server.py`.
 
