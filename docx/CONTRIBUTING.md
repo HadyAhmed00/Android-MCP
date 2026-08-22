@@ -166,8 +166,12 @@ Releases are automated. Two repos are involved.
 4. The `publish` workflow then uploads to PyPI via Trusted Publishing (OIDC — no token secret).
 
 One-time setup before the first release: register the trusted publisher on PyPI
-(project `android-mcp`, owner `HadyAhmed00`, repo `Android-MCP`, workflow `publish.yml`,
+(project `android-mcp-portal`, owner `HadyAhmed00`, repo `Android-MCP`, workflow `publish.yml`,
 environment `pypi`).
+
+**Note:** the plain `android-mcp` name on PyPI belongs to an unrelated project
+(`CursorTouch/Android-MCP`) — this distribution is `android-mcp-portal`. The console script
+is installed under both `android-mcp-portal` and `android-mcp`.
 
 ### The Portal APK (`HadyAhmed00/Android-MCP-Portal`)
 

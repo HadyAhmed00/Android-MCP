@@ -180,7 +180,7 @@ adb devices
 adb -s <device_id> shell pm list packages | grep portal
 
 # If not installed, let the server do it:
-uvx android-mcp setup --device <device_id>        # add --force-setup to reinstall
+uvx android-mcp-portal setup --device <device_id>        # add --force-setup to reinstall
 
 # Manual fallback (OEMs that block enabling a11y services over ADB):
 # 1. Download portal.apk from https://github.com/HadyAhmed00/Android-MCP-Portal/releases

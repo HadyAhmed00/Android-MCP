@@ -3,7 +3,7 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "android-mcp"
+name = "android-mcp-portal"
 version = "0.2.0"
 description = "Lightweight MCP Server for Android Operating System"
 readme = "README.md"
@@ -21,6 +21,10 @@ dependencies = [
 ]
 
 [project.scripts]
+# Both names run the same entry point: `android-mcp-portal` matches the PyPI
+# distribution so `uvx android-mcp-portal` resolves without --from, and
+# `android-mcp` is kept as the short local command.
+android-mcp-portal = "android_mcp.server:main"
 android-mcp = "android_mcp.server:main"
 
 [dependency-groups]
