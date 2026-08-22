@@ -1,6 +1,7 @@
 from dataclasses import dataclass
-from src.tree.views import TreeState
 from typing import Literal, Optional
+
+from android_mcp.tree.views import TreeState
 
 
 @dataclass

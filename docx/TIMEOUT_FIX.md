@@ -96,17 +96,17 @@ emulator-5554	device
 
 ### Step 2: Check MCP Helper Installation
 ```bash
-adb shell pm list packages | grep MCP_Helper
+adb shell pm list packages | grep portal
 ```
 
 Expected output:
 ```
-package:com.HadyAhmed00.MCP_Helper
+package:io.github.hadyahmed00.portal
 ```
 
 ### Step 3: Verify MCP Helper is Running
 ```bash
-adb shell content query --uri content://com.HadyAhmed00.MCP_Helper/ping
+adb shell content query --uri content://io.github.hadyahmed00.portal/ping
 ```
 
 Expected output:

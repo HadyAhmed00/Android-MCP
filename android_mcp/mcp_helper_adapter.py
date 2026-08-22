@@ -5,9 +5,10 @@ expected Tree and Mobile state formats.
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
-from src.mcp_helper import MCPHelperClient, A11yTreeNode, A11yFullNode
-from src.tree.views import ElementNode, CenterCord, BoundingBox, TreeState, classify_element
+from typing import List
+
+from android_mcp.mcp_helper import A11yFullNode, A11yTreeNode, MCPHelperClient
+from android_mcp.tree.views import BoundingBox, CenterCord, ElementNode, TreeState, classify_element
 
 
 @dataclass

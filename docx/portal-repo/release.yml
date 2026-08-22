@@ -1,0 +1,56 @@
+# Copy to HadyAhmed00/Android-MCP-Portal as .github/workflows/release.yml
+#
+# Builds a signed portal.apk on a v* tag and attaches it (plus its sha256) to the
+# GitHub Release. Android-MCP's bootstrap pins that exact asset name and digest.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Derive version
+        run: |
+          echo "VERSION_NAME=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+          echo "VERSION_CODE=$GITHUB_RUN_NUMBER" >> $GITHUB_ENV
+
+      - name: Decode keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: echo "$KEYSTORE_B64" | base64 -d > app/release.jks
+
+      - name: Build release APK
+        env:
+          KEYSTORE_PATH: release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease -PversionName=$VERSION_NAME -PversionCode=$VERSION_CODE
+
+      - name: Rename and checksum
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk portal.apk
+          sha256sum portal.apk | awk '{print $1}' > portal.apk.sha256
+          cat portal.apk.sha256
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            portal.apk
+            portal.apk.sha256
+          generate_release_notes: true

@@ -115,19 +115,19 @@ Comprehensive test suite covering:
 
 #### 1. Ping
 ```bash
-adb shell content query --uri content://com.HadyAhmed00.MCP_Helper/ping
+adb shell content query --uri content://io.github.hadyahmed00.portal/ping
 ```
 Returns: `{"status":"success","data":"pong"}`
 
 #### 2. Version
 ```bash
-adb shell content query --uri content://com.HadyAhmed00.MCP_Helper/version
+adb shell content query --uri content://io.github.hadyahmed00.portal/version
 ```
 Returns: `{"status":"success","data":"0.4.8"}`
 
 #### 3. Phone State
 ```bash
-adb shell content query --uri content://com.HadyAhmed00.MCP_Helper/phone_state
+adb shell content query --uri content://io.github.hadyahmed00.portal/phone_state
 ```
 Returns:
 ```json
@@ -139,7 +139,7 @@ Returns:
 
 #### 4. Accessibility Tree (Simplified)
 ```bash
-adb shell content query --uri content://com.HadyAhmed00.MCP_Helper/a11y_tree
+adb shell content query --uri content://io.github.hadyahmed00.portal/a11y_tree
 ```
 Returns filtered tree with overlay indices:
 ```json
@@ -151,8 +151,8 @@ Returns filtered tree with overlay indices:
 
 #### 5. Accessibility Tree (Full)
 ```bash
-adb shell content query --uri content://com.HadyAhmed00.MCP_Helper/a11y_tree_full
-adb shell content query --uri 'content://com.HadyAhmed00.MCP_Helper/a11y_tree_full?filter=false'
+adb shell content query --uri content://io.github.hadyahmed00.portal/a11y_tree_full
+adb shell content query --uri 'content://io.github.hadyahmed00.portal/a11y_tree_full?filter=false'
 ```
 Returns complete node info with all properties:
 - All boolean attributes (clickable, focusable, enabled, visible, etc.)
@@ -162,20 +162,20 @@ Returns complete node info with all properties:
 
 #### 6. Combined State
 ```bash
-adb shell content query --uri content://com.HadyAhmed00.MCP_Helper/state
+adb shell content query --uri content://io.github.hadyahmed00.portal/state
 ```
 Returns: `{"a11y_tree":[...], "phone_state":{...}}`
 
 #### 7. Combined State (Full)
 ```bash
-adb shell content query --uri content://com.HadyAhmed00.MCP_Helper/state_full
-adb shell content query --uri 'content://com.HadyAhmed00.MCP_Helper/state_full?filter=false'
+adb shell content query --uri content://io.github.hadyahmed00.portal/state_full
+adb shell content query --uri 'content://io.github.hadyahmed00.portal/state_full?filter=false'
 ```
 Returns: `{"a11y_tree":{...}, "phone_state":{...}, "device_context":{...}}`
 
 #### 8. Installed Packages
 ```bash
-adb shell content query --uri content://com.HadyAhmed00.MCP_Helper/packages
+adb shell content query --uri content://io.github.hadyahmed00.portal/packages
 ```
 Returns list of installed apps with package info
 
@@ -183,35 +183,35 @@ Returns list of installed apps with package info
 
 #### 1. Keyboard Input
 ```bash
-adb shell content insert --uri content://com.HadyAhmed00.MCP_Helper/keyboard/input \
+adb shell content insert --uri content://io.github.hadyahmed00.portal/keyboard/input \
   --bind base64_text:s:"SGVsbG8=" \
   --bind clear:b:true
 ```
 
 #### 2. Keyboard Clear
 ```bash
-adb shell content insert --uri content://com.HadyAhmed00.MCP_Helper/keyboard/clear
+adb shell content insert --uri content://io.github.hadyahmed00.portal/keyboard/clear
 ```
 
 #### 3. Keyboard Key Event
 ```bash
-adb shell content insert --uri content://com.HadyAhmed00.MCP_Helper/keyboard/key \
+adb shell content insert --uri content://io.github.hadyahmed00.portal/keyboard/key \
   --bind key_code:i:66
 ```
 Common key codes: 4=Back, 66=Enter, 67=Backspace, 27=Tab
 
 #### 4. Overlay Settings
 ```bash
-adb shell content insert --uri content://com.HadyAhmed00.MCP_Helper/overlay_offset \
+adb shell content insert --uri content://io.github.hadyahmed00.portal/overlay_offset \
   --bind offset:i:100
 
-adb shell content insert --uri content://com.HadyAhmed00.MCP_Helper/overlay_visible \
+adb shell content insert --uri content://io.github.hadyahmed00.portal/overlay_visible \
   --bind visible:b:true
 ```
 
 #### 5. Socket Configuration
 ```bash
-adb shell content insert --uri content://com.HadyAhmed00.MCP_Helper/socket_port \
+adb shell content insert --uri content://io.github.hadyahmed00.portal/socket_port \
   --bind port:i:8090
 ```
 
@@ -400,7 +400,7 @@ Tests included:
 
 ### "MCP Helper not responding" warning
 - Ensure MCP Helper app is installed on device
-- Check: `adb shell pm list packages | grep MCP_Helper`
+- Check: `adb shell pm list packages | grep portal`
 - App will automatically fallback to UIAutomator
 
 ### Empty or incorrect tree data

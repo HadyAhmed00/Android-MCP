@@ -1,19 +1,26 @@
-from src.mobile.views import MobileState, DeviceContext
-from src.tree import Tree
-import uiautomator2 as u2
-from io import BytesIO
-from PIL import Image
-import time
-from typing import Optional
-from src.mcp_helper import MCPHelperClient
-from src.mcp_helper_adapter import MCPHelperMobileAdapter
 import subprocess
-import tempfile
-import os
+import sys
+import time
+from io import BytesIO
+from typing import Optional
+
+import uiautomator2 as u2
+from PIL import Image
+
+from android_mcp.adb import adb_base
+from android_mcp.mcp_helper import MCPHelperClient
+from android_mcp.mcp_helper_adapter import MCPHelperMobileAdapter
+from android_mcp.mobile.views import DeviceContext, MobileState
+from android_mcp.tree import Tree
+
 
 class Mobile:
-    def __init__(self, device: str = None, use_mcp_helper: bool = True):
+    def __init__(self, device: str = None, use_mcp_helper: bool = True,
+                 auto_bootstrap: bool = True, portal_apk: str = None):
         self.device_id = device
+        self.auto_bootstrap = auto_bootstrap
+        self.portal_apk = portal_apk
+        self._bootstrap_attempted = False
         self.device = None
         self._state_cache = None
         self._cache_timestamp = 0
@@ -39,13 +46,37 @@ class Mobile:
         try:
             mcp_client = MCPHelperClient(device_id=self.device_id)
             # Use a shorter timeout for initial check
-            if mcp_client.ping():
+            if not self._ping_quiet(mcp_client) and self._bootstrap():
+                # Portal was just installed/enabled - give it a moment, then retry
+                time.sleep(1)
+            if self._ping_quiet(mcp_client):
                 self.mcp_adapter = MCPHelperMobileAdapter(mcp_client)
                 self._mcp_initialized = True
             else:
                 self.use_mcp_helper = False
-        except Exception as e:
+        except Exception:
             self.use_mcp_helper = False
+
+    @staticmethod
+    def _ping_quiet(client) -> bool:
+        try:
+            return client.ping()
+        except Exception:
+            return False
+
+    def _bootstrap(self) -> bool:
+        """Install/enable the Portal app on first miss. Returns True if it now works."""
+        if self._bootstrap_attempted or not self.auto_bootstrap:
+            return False
+        self._bootstrap_attempted = True
+
+        from android_mcp.bootstrap import ensure_portal
+
+        report = ensure_portal(self.device_id, apk_path=self.portal_apk)
+        self.last_bootstrap_report = report
+        # Progress goes to the real stderr; stdout is the MCP stdio channel.
+        print(report.to_string(), file=getattr(sys, '__stderr__', sys.stderr))
+        return report.ok
 
     def _ensure_connected(self):
         """Lazy connection - only connect when actually needed"""
@@ -73,9 +104,7 @@ class Mobile:
         if self._screen_size is not None:
             return self._screen_size
         try:
-            cmd = ["adb"]
-            if self.device_id:
-                cmd.extend(["-s", self.device_id])
+            cmd = adb_base(self.device_id)
             cmd.extend(["shell", "wm", "size"])
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
             # Parse "Physical size: 1080x1920"
@@ -147,10 +176,10 @@ class Mobile:
                     error_msg = str(mcp_error)
 
                     if self._mcp_error_count >= self._mcp_max_consecutive_errors:
-                        print(f"Warning: MCP Helper failed {self._mcp_error_count} times ({error_msg}). Switching to UIAutomator")
+                        print(f"Warning: MCP Helper failed {self._mcp_error_count} times ({error_msg}). Switching to UIAutomator", file=sys.stderr)
                         self.use_mcp_helper = False
                     else:
-                        print(f"Warning: MCP Helper temporary error ({self._mcp_error_count}/{self._mcp_max_consecutive_errors}): {error_msg}. Retrying...")
+                        print(f"Warning: MCP Helper temporary error ({self._mcp_error_count}/{self._mcp_max_consecutive_errors}): {error_msg}. Retrying...", file=sys.stderr)
 
             # Fallback to UIAutomator if MCP Helper unavailable
             self._ensure_connected()
@@ -168,9 +197,7 @@ class Mobile:
             current_app = ""
             current_activity = ""
             try:
-                cmd = ["adb"]
-                if self.device_id:
-                    cmd.extend(["-s", self.device_id])
+                cmd = adb_base(self.device_id)
                 cmd.extend(["shell", "dumpsys activity activities"])
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
                 for line in result.stdout.splitlines():
@@ -208,17 +235,25 @@ class Mobile:
         try:
             # Use ADB screencap instead of uiautomator2 to avoid accessibility service conflict
             # Capture screenshot using ADB
-            cmd = ["adb"]
-            if self.device_id:
-                cmd.extend(["-s", self.device_id])
+            cmd = adb_base(self.device_id)
             cmd.extend(["exec-out", "screencap", "-p"])
 
             result = subprocess.run(cmd, capture_output=True, timeout=10)
             if result.returncode != 0:
                 raise RuntimeError(f"Screenshot capture failed: {result.stderr}")
 
+            # Multi-display devices print a "[Warning] Multiple displays were found"
+            # notice on stdout ahead of the PNG payload; drop anything before the
+            # PNG magic bytes so PIL sees a clean stream.
+            raw = result.stdout
+            magic = bytes.fromhex("89504e470d0a1a0a")
+            offset = raw.find(magic)
+            if offset == -1:
+                raise RuntimeError(f"Screenshot output is not a PNG: {raw[:200]!r}")
+            raw = raw[offset:]
+
             # Load image directly from bytes (avoiding temp file issues on Windows)
-            screenshot = Image.open(BytesIO(result.stdout))
+            screenshot = Image.open(BytesIO(raw))
             if screenshot is None:
                 raise ValueError("Screenshot capture returned None.")
 
