@@ -3,7 +3,7 @@
   "packages": {
     ".": {
       "release-type": "python",
-      "package-name": "android-mcp",
+      "package-name": "android-mcp-portal",
       "extra-files": [
         {
           "type": "generic",

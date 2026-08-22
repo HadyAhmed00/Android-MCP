@@ -23,7 +23,7 @@ automatically on first use.
 ## Installation
 
 ```bash
-claude mcp add android -- uvx android-mcp@latest --emulator
+claude mcp add android -- uvx android-mcp-portal@latest --emulator
 ```
 
 Drop `--emulator` for a physical device, or pass `--device <id>` to pick one.
@@ -35,7 +35,7 @@ For any other MCP client, use the equivalent config:
   "mcpServers": {
     "android-mcp": {
       "command": "uvx",
-      "args": ["android-mcp@latest", "--emulator"]
+      "args": ["android-mcp-portal@latest", "--emulator"]
     }
   }
 }
@@ -55,7 +55,7 @@ For any other MCP client, use the equivalent config:
 Run it yourself any time with:
 
 ```bash
-uvx android-mcp setup --device emulator-5554     # add --force-setup to reinstall
+uvx android-mcp-portal setup --device emulator-5554     # add --force-setup to reinstall
 ```
 
 or ask the agent to call the `Setup-Device` tool.

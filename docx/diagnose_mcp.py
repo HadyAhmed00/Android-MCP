@@ -181,7 +181,7 @@ def main():
 
         if not results[1][1]:
             print("[ACTION] Install MCP Helper app on your device")
-            print("  Run: uvx android-mcp setup")
+            print("  Run: uvx android-mcp-portal setup")
 
         if not results[2][1]:
             print("[ACTION] Ensure MCP Helper app is running")
