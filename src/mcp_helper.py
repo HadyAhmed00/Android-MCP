@@ -135,7 +135,7 @@ class AppInfo:
 class MCPHelperClient:
     """Client for communicating with MCP Helper Content Provider"""
 
-    PROVIDER_AUTHORITY = "com.droidrun.portal"
+    PROVIDER_AUTHORITY = "io.github.hadyahmed00.portal"
 
     def __init__(self, device_id: Optional[str] = None):
         """Initialize MCP Helper client

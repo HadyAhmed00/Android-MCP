@@ -8,6 +8,7 @@ from typing import Optional
 from src.mcp_helper import MCPHelperClient
 from src.mcp_helper_adapter import MCPHelperMobileAdapter
 import subprocess
+import sys
 import tempfile
 import os
 
@@ -147,10 +148,10 @@ class Mobile:
                     error_msg = str(mcp_error)
 
                     if self._mcp_error_count >= self._mcp_max_consecutive_errors:
-                        print(f"Warning: MCP Helper failed {self._mcp_error_count} times ({error_msg}). Switching to UIAutomator")
+                        print(f"Warning: MCP Helper failed {self._mcp_error_count} times ({error_msg}). Switching to UIAutomator", file=sys.stderr)
                         self.use_mcp_helper = False
                     else:
-                        print(f"Warning: MCP Helper temporary error ({self._mcp_error_count}/{self._mcp_max_consecutive_errors}): {error_msg}. Retrying...")
+                        print(f"Warning: MCP Helper temporary error ({self._mcp_error_count}/{self._mcp_max_consecutive_errors}): {error_msg}. Retrying...", file=sys.stderr)
 
             # Fallback to UIAutomator if MCP Helper unavailable
             self._ensure_connected()
@@ -217,8 +218,18 @@ class Mobile:
             if result.returncode != 0:
                 raise RuntimeError(f"Screenshot capture failed: {result.stderr}")
 
+            # Multi-display devices print a "[Warning] Multiple displays were found"
+            # notice on stdout ahead of the PNG payload; drop anything before the
+            # PNG magic bytes so PIL sees a clean stream.
+            raw = result.stdout
+            magic = bytes.fromhex("89504e470d0a1a0a")
+            offset = raw.find(magic)
+            if offset == -1:
+                raise RuntimeError(f"Screenshot output is not a PNG: {raw[:200]!r}")
+            raw = raw[offset:]
+
             # Load image directly from bytes (avoiding temp file issues on Windows)
-            screenshot = Image.open(BytesIO(result.stdout))
+            screenshot = Image.open(BytesIO(raw))
             if screenshot is None:
                 raise ValueError("Screenshot capture returned None.")
 

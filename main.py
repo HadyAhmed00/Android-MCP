@@ -557,6 +557,3 @@ def report_bug_to_azure(
 
 if __name__ == '__main__':
     mcp.run()
-    #print the server have started and print alos the currnt working device
-    print('Server started on ' + mcp.get_url())
-    print('Current working device:', mobile.get_device().device_info)
