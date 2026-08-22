@@ -23,7 +23,7 @@ automatically on first use.
 ## Installation
 
 ```bash
-claude mcp add android -- uvx android-mcp-portal@latest --emulator
+claude mcp add android -- uvx --from git+https://github.com/HadyAhmed00/Android-MCP@main android-mcp-portal --emulator
 ```
 
 Drop `--emulator` for a physical device, or pass `--device <id>` to pick one.
@@ -35,11 +35,20 @@ For any other MCP client, use the equivalent config:
   "mcpServers": {
     "android-mcp": {
       "command": "uvx",
-      "args": ["android-mcp-portal@latest", "--emulator"]
+      "args": [
+        "--from",
+        "git+https://github.com/HadyAhmed00/Android-MCP@main",
+        "android-mcp-portal",
+        "--emulator"
+      ]
     }
   }
 }
 ```
+
+> **Note:** the PyPI release is not published yet, so install straight from GitHub as above.
+> Once `android-mcp-portal` is on PyPI this shortens to
+> `claude mcp add android -- uvx android-mcp-portal@latest --emulator`.
 
 ### What happens on first use
 
@@ -55,7 +64,7 @@ For any other MCP client, use the equivalent config:
 Run it yourself any time with:
 
 ```bash
-uvx android-mcp-portal setup --device emulator-5554     # add --force-setup to reinstall
+uvx --from git+https://github.com/HadyAhmed00/Android-MCP@main android-mcp-portal setup --device emulator-5554
 ```
 
 or ask the agent to call the `Setup-Device` tool.
