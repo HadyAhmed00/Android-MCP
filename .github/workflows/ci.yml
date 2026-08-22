@@ -23,11 +23,14 @@ jobs:
       - name: Install wheel into a clean env and smoke it
         shell: bash
         run: |
-          uv venv .smoke
-          VIRTUAL_ENV=.smoke uv pip install --python ${{ matrix.python }} dist/*.whl
+          uv venv --python ${{ matrix.python }} .smoke
           BIN=.smoke/bin; [ -d .smoke/Scripts ] && BIN=.smoke/Scripts
-          "$BIN/python" -c "import android_mcp.server, android_mcp.bootstrap, android_mcp.adb; print('imports ok')"
-          "$BIN/android-mcp" --help
+          VIRTUAL_ENV=.smoke uv pip install dist/*.whl
+          # Run from a scratch dir so the repo's android_mcp/ cannot shadow the installed wheel
+          mkdir -p .smokerun
+          cd .smokerun
+          "../$BIN/python" -c "import android_mcp.server, android_mcp.bootstrap, android_mcp.adb; print('imports ok')"
+          "../$BIN/android-mcp" --help
 
   lint:
     runs-on: ubuntu-latest
